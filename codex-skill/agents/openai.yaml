@@ -1,0 +1,6 @@
+interface:
+  display_name: "Skill Usefulness Audit"
+  short_description: "Audit installed skills for real utility"
+  default_prompt: "Use $skill-usefulness-audit to score installed skills, detect overlap, and recommend removals."
+policy:
+  allow_implicit_invocation: false
