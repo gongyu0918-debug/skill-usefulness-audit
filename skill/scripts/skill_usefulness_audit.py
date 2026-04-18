@@ -92,6 +92,109 @@ TOOL_KEYWORDS = {
     "xml",
 }
 
+NAME_KEYS = (
+    "skill",
+    "name",
+    "id",
+    "slug",
+    "identifier",
+    "skill_name",
+    "skill_id",
+    "skillid",
+    "技能",
+    "技能名",
+    "技能名称",
+)
+
+COUNT_KEYS = (
+    "calls",
+    "count",
+    "uses",
+    "usage",
+    "invocations",
+    "call_count",
+    "usage_count",
+    "invoke_count",
+    "调用次数",
+    "调用数",
+    "使用次数",
+    "次数",
+)
+
+COLLECTION_KEYS = {
+    "skills",
+    "items",
+    "results",
+    "records",
+    "entries",
+    "data",
+    "usage",
+    "counts",
+    "metrics",
+    "cases",
+    "rows",
+    "messages",
+    "conversations",
+    "threads",
+    "history",
+}
+
+SCALAR_MAP_KEYS = {
+    "usage",
+    "counts",
+    "metrics",
+    "skill_usage",
+    "skill_usages",
+    "skill_counts",
+    "skill_calls",
+    "调用统计",
+    "按技能调用",
+}
+
+WITH_SKILL_KEYS = ("with_skill", "with", "enabled", "treatment", "experiment", "skill_run", "启用技能")
+WITHOUT_SKILL_KEYS = ("without_skill", "without", "disabled", "baseline", "control", "no_skill", "基线", "未启用技能")
+
+FLAT_WITH_SCORE_KEYS = ("with_skill_score", "score_with_skill", "skill_score", "enabled_score", "实验分数", "启用技能分数")
+FLAT_WITHOUT_SCORE_KEYS = (
+    "without_skill_score",
+    "score_without_skill",
+    "baseline_score",
+    "control_score",
+    "基线分数",
+    "未启用技能分数",
+)
+FLAT_WITH_PASS_KEYS = ("with_skill_pass", "pass_with_skill", "skill_pass", "enabled_pass", "实验通过", "启用技能通过")
+FLAT_WITHOUT_PASS_KEYS = (
+    "without_skill_pass",
+    "pass_without_skill",
+    "baseline_pass",
+    "control_pass",
+    "基线通过",
+    "未启用技能通过",
+)
+
+VERDICT_ALIASES = {
+    "same": "same",
+    "equal": "same",
+    "equivalent": "same",
+    "一致": "same",
+    "相同": "same",
+    "无差异": "same",
+    "持平": "same",
+    "better": "better",
+    "improved": "better",
+    "improve": "better",
+    "更好": "better",
+    "更优": "better",
+    "提升": "better",
+    "worse": "worse",
+    "degraded": "worse",
+    "regressed": "worse",
+    "更差": "worse",
+    "退化": "worse",
+    "变差": "worse",
+}
+
 
 def normalize_name(value: str) -> str:
     value = value.strip().lower()
@@ -251,11 +354,42 @@ def coerce_bool(value) -> bool | None:
         return bool(value)
     if isinstance(value, str):
         lowered = value.strip().lower()
-        if lowered in {"true", "yes", "1", "pass", "passed"}:
+        if lowered in {"true", "yes", "1", "pass", "passed", "success", "succeeded", "ok", "成功", "通过"}:
             return True
-        if lowered in {"false", "no", "0", "fail", "failed"}:
+        if lowered in {"false", "no", "0", "fail", "failed", "error", "errored", "失败", "未通过"}:
             return False
     return None
+
+
+def first_present(mapping: dict, keys: tuple[str, ...] | list[str]) -> object | None:
+    lowered = {str(key).lower(): value for key, value in mapping.items()}
+    for key in keys:
+        if key in mapping:
+            return mapping[key]
+        if key.lower() in lowered:
+            return lowered[key.lower()]
+    return None
+
+
+def normalize_verdict(value) -> str:
+    if value is None:
+        return ""
+    lowered = str(value).strip().lower()
+    return VERDICT_ALIASES.get(lowered, lowered)
+
+
+def collect_strings(node) -> list[str]:
+    values: list[str] = []
+    if isinstance(node, str):
+        return [node]
+    if isinstance(node, list):
+        for item in node:
+            values.extend(collect_strings(item))
+        return values
+    if isinstance(node, dict):
+        for value in node.values():
+            values.extend(collect_strings(value))
+    return values
 
 
 def add_usage(usage: dict[str, int], name: str, value) -> None:
@@ -266,6 +400,33 @@ def add_usage(usage: dict[str, int], name: str, value) -> None:
     usage[key] = usage.get(key, 0) + count
 
 
+def consume_usage_node(node, usage: dict[str, int], hint_name: str | None = None, scalar_map: bool = False) -> None:
+    if isinstance(node, list):
+        for item in node:
+            consume_usage_node(item, usage, hint_name=hint_name, scalar_map=scalar_map)
+        return
+
+    if isinstance(node, dict):
+        name = first_present(node, NAME_KEYS)
+        count = first_present(node, COUNT_KEYS)
+        if name is not None and count is not None:
+            add_usage(usage, str(name), count)
+            return
+
+        for key, value in node.items():
+            key_text = str(key)
+            key_norm = normalize_name(key_text)
+            next_scalar_map = scalar_map or key_text in SCALAR_MAP_KEYS or key_norm in SCALAR_MAP_KEYS
+            child_hint = hint_name
+            if next_scalar_map and key_text not in COLLECTION_KEYS and key_norm not in COLLECTION_KEYS:
+                child_hint = key_text
+            consume_usage_node(value, usage, hint_name=child_hint, scalar_map=next_scalar_map)
+        return
+
+    if scalar_map and hint_name is not None:
+        add_usage(usage, hint_name, node)
+
+
 def load_usage_csv(path: Path) -> dict[str, int]:
     usage: dict[str, int] = {}
     delimiter = "\t" if path.suffix.lower() == ".tsv" else ","
@@ -274,8 +435,8 @@ def load_usage_csv(path: Path) -> dict[str, int]:
         for row in reader:
             add_usage(
                 usage,
-                row.get("skill") or row.get("name") or row.get("id") or "",
-                row.get("calls") or row.get("count") or row.get("uses") or row.get("invocations"),
+                str(first_present(row, NAME_KEYS) or ""),
+                first_present(row, COUNT_KEYS),
             )
     return usage
 
@@ -283,25 +444,7 @@ def load_usage_csv(path: Path) -> dict[str, int]:
 def load_usage_json(path: Path) -> dict[str, int]:
     usage: dict[str, int] = {}
     payload = load_json_or_jsonl(path)
-    if isinstance(payload, dict):
-        for key, value in payload.items():
-            if isinstance(value, dict):
-                add_usage(
-                    usage,
-                    value.get("skill") or value.get("name") or key,
-                    value.get("calls") or value.get("count") or value.get("uses") or value.get("invocations"),
-                )
-            else:
-                add_usage(usage, key, value)
-    elif isinstance(payload, list):
-        for item in payload:
-            if not isinstance(item, dict):
-                continue
-            add_usage(
-                usage,
-                item.get("skill") or item.get("name") or item.get("id") or "",
-                item.get("calls") or item.get("count") or item.get("uses") or item.get("invocations"),
-            )
+    consume_usage_node(payload, usage)
     return usage
 
 
@@ -328,7 +471,14 @@ def infer_usage_from_history(paths: list[Path], skill_names: list[str]) -> dict[
     for path in paths:
         if not path.exists():
             continue
-        text = read_text(path).lower()
+        if path.suffix.lower() in {".json", ".jsonl"}:
+            try:
+                payload = load_json_or_jsonl(path)
+                text = "\n".join(collect_strings(payload)).lower()
+            except json.JSONDecodeError:
+                text = read_text(path).lower()
+        else:
+            text = read_text(path).lower()
         for name, pattern in patterns.items():
             usage[name] += len(pattern.findall(text))
     return usage
@@ -343,19 +493,59 @@ def get_nested(entry: dict, *keys: str):
     return current
 
 
+def pick_arm(entry: dict, keys: tuple[str, ...]) -> dict:
+    for key in keys:
+        value = entry.get(key)
+        if isinstance(value, dict):
+            return value
+    lowered = {str(key).lower(): value for key, value in entry.items()}
+    for key in keys:
+        value = lowered.get(key.lower())
+        if isinstance(value, dict):
+            return value
+    return {}
+
+
+def flat_metric(entry: dict, keys: tuple[str, ...], coercer):
+    value = first_present(entry, keys)
+    return coercer(value)
+
+
+def ablation_items_from_node(node, items: list[dict]) -> None:
+    if isinstance(node, list):
+        for item in node:
+            ablation_items_from_node(item, items)
+        return
+    if not isinstance(node, dict):
+        return
+
+    has_name = first_present(node, NAME_KEYS) is not None
+    has_verdict = first_present(node, ("verdict", "结果", "结论")) is not None
+    has_arms = pick_arm(node, WITH_SKILL_KEYS) or pick_arm(node, WITHOUT_SKILL_KEYS)
+    has_flat_metrics = (
+        first_present(node, FLAT_WITH_SCORE_KEYS + FLAT_WITHOUT_SCORE_KEYS) is not None
+        or first_present(node, FLAT_WITH_PASS_KEYS + FLAT_WITHOUT_PASS_KEYS) is not None
+    )
+    if has_name and (has_verdict or has_arms or has_flat_metrics):
+        items.append(node)
+        return
+
+    for value in node.values():
+        ablation_items_from_node(value, items)
+
+
 def load_ablation(paths: list[Path]) -> dict[str, dict[str, float]]:
     by_skill: dict[str, list[dict]] = {}
     for path in paths:
         if not path.exists():
             continue
         payload = load_json_or_jsonl(path)
-        items = payload.get("cases", []) if isinstance(payload, dict) else payload
-        if not isinstance(items, list):
-            continue
+        items: list[dict] = []
+        ablation_items_from_node(payload, items)
         for item in items:
             if not isinstance(item, dict):
                 continue
-            name = normalize_name(item.get("skill") or item.get("name") or "")
+            name = normalize_name(str(first_present(item, NAME_KEYS) or ""))
             if not name:
                 continue
             by_skill.setdefault(name, []).append(item)
@@ -367,11 +557,21 @@ def load_ablation(paths: list[Path]) -> dict[str, dict[str, float]]:
         worse_count = 0
         deltas: list[float] = []
         for item in items:
-            verdict = str(item.get("verdict", "")).strip().lower()
-            with_pass = coerce_bool(get_nested(item, "with_skill", "pass"))
-            without_pass = coerce_bool(get_nested(item, "without_skill", "pass"))
-            with_score = coerce_float(get_nested(item, "with_skill", "score"))
-            without_score = coerce_float(get_nested(item, "without_skill", "score"))
+            verdict = normalize_verdict(first_present(item, ("verdict", "结果", "结论")))
+            with_arm = pick_arm(item, WITH_SKILL_KEYS)
+            without_arm = pick_arm(item, WITHOUT_SKILL_KEYS)
+            with_pass = coerce_bool(first_present(with_arm, ("pass", "passed", "success", "结果", "通过")))
+            without_pass = coerce_bool(first_present(without_arm, ("pass", "passed", "success", "结果", "通过")))
+            with_score = coerce_float(first_present(with_arm, ("score", "quality", "quality_score", "分数", "质量分")))
+            without_score = coerce_float(first_present(without_arm, ("score", "quality", "quality_score", "分数", "质量分")))
+            if with_pass is None:
+                with_pass = flat_metric(item, FLAT_WITH_PASS_KEYS, coerce_bool)
+            if without_pass is None:
+                without_pass = flat_metric(item, FLAT_WITHOUT_PASS_KEYS, coerce_bool)
+            if with_score is None:
+                with_score = flat_metric(item, FLAT_WITH_SCORE_KEYS, coerce_float)
+            if without_score is None:
+                without_score = flat_metric(item, FLAT_WITHOUT_SCORE_KEYS, coerce_float)
 
             delta = None
             if with_score is not None and without_score is not None:

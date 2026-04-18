@@ -1,8 +1,8 @@
 ---
 name: skill-usefulness-audit
 slug: skill-usefulness-audit
-description: Audit whether installed skills still create real value. Use only when the user explicitly asks to review, score, rank, consolidate, or delete installed skills across Codex, OpenClaw, Claude Code, or similar agent hosts. This skill checks call frequency, loads installed skill instructions, detects functional overlap, runs ablation on history for non-API and non-tool skills, then outputs a 10-point score table, evidence, and deletion recommendations.
-version: 0.1.0
+description: Audit whether installed skills still create real value. 审计已安装 skill 是否还有真实价值。Use only when the user explicitly asks to review, score, rank, consolidate, or delete installed skills across Codex, OpenClaw, Claude Code, or similar agent hosts. 当用户明确要求审查、评分、排序、合并或删除已安装 skill 时使用。This skill checks call frequency, loads installed skill instructions, detects functional overlap, runs ablation on history for non-API and non-tool skills, then outputs a 10-point score table, evidence, and deletion recommendations. 它会检查调用次数、读取已装 skill 说明、识别功能重叠、对非 API 与非工具型 skill 跑历史消融，并输出 10 分制评分表、判定依据和删除建议。
+version: 0.1.1
 tags: [audit, skills, ablation, codex, openclaw]
 homepage: https://github.com/gongyu0918-debug/skill-usefulness-audit
 ---
@@ -13,10 +13,16 @@ homepage: https://github.com/gongyu0918-debug/skill-usefulness-audit
 Use this skill to judge whether installed skills still deserve to stay installed.
 It turns vague "this feels useless" opinions into a repeatable audit based on usage, overlap, and outcome impact.
 
+用这个 skill 判断哪些已安装 skill 还值得保留。
+它把“感觉没用”变成可复现的审计流程，基于调用频率、功能重叠和结果影响来判断。
+
 ## Manual Trigger Only
 
 Run this skill only after a direct user request.
 Do not invoke it implicitly during normal task execution.
+
+只在用户手动要求时运行。
+正常任务执行过程中不要隐式触发。
 
 ## Audit Scope
 
@@ -29,6 +35,16 @@ Audit these layers in order:
 
 Treat API and tool skills as protected capability skills during ablation.
 Examples: Excel, DOCX, PDF, browser automation, deployment, OCR, external API wrappers, MCP/API gateway helpers.
+
+按这个顺序审计：
+
+1. 调用次数或调用证据
+2. 已安装 skill 的元数据与说明
+3. skill 之间的功能重叠
+4. 非 API、非工具型 skill 在历史对话上的消融影响
+
+在消融阶段，把 API skill 和工具型 skill 当作受保护能力。
+例如：Excel、DOCX、PDF、浏览器自动化、部署、OCR、外部 API 包装器、MCP/API 网关类 skill。
 
 ## Workflow
 

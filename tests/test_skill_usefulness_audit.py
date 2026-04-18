@@ -105,11 +105,93 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
         self.assertIn("| 1 | emotion-orchestrator |", result.stdout)
         self.assertIn("calls=2", result.stdout)
 
+    def test_nested_usage_with_chinese_keys_is_supported(self) -> None:
+        skills_root = self.tempdir / "skills"
+        write_skill(skills_root, "emotion-orchestrator", "Detect emotion and route reply style.")
+
+        usage_path = self.tempdir / "usage.json"
+        usage_path.write_text(
+            json.dumps({"data": {"调用统计": {"emotion-orchestrator": 7}}}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+        result = self.run_audit(
+            "--skills-root",
+            str(skills_root),
+            "--usage-file",
+            str(usage_path),
+        )
+
+        self.assertIn("calls=7", result.stdout)
+
+    def test_nested_history_json_content_is_supported(self) -> None:
+        skills_root = self.tempdir / "skills"
+        write_skill(skills_root, "skill-usefulness-audit", "Audit installed skills.")
+
+        history_path = self.tempdir / "history.json"
+        history_path.write_text(
+            json.dumps(
+                [
+                    {
+                        "role": "user",
+                        "content": [{"type": "text", "text": "请运行 $skill-usefulness-audit"}],
+                    },
+                    {
+                        "role": "assistant",
+                        "parts": [{"type": "output_text", "text": "skill-usefulness-audit 已执行"}],
+                    },
+                ],
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+
+        result = self.run_audit(
+            "--skills-root",
+            str(skills_root),
+            "--history-file",
+            str(history_path),
+        )
+
+        self.assertIn("calls=2", result.stdout)
+
+    def test_ablation_with_alias_fields_and_chinese_verdict_is_supported(self) -> None:
+        skills_root = self.tempdir / "skills"
+        write_skill(skills_root, "tone-polisher", "Rewrite text with polished tone and softer phrasing.")
+
+        ablation_path = self.tempdir / "ablation.json"
+        ablation_path.write_text(
+            json.dumps(
+                {
+                    "results": [
+                        {
+                            "技能": "tone-polisher",
+                            "实验分数": 0.9,
+                            "基线分数": 0.7,
+                            "结论": "更好",
+                        }
+                    ]
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+
+        result = self.run_audit(
+            "--skills-root",
+            str(skills_root),
+            "--ablation-file",
+            str(ablation_path),
+        )
+
+        self.assertIn("better=1.00", result.stdout)
+
     def test_sync_bundle_writes_publish_manifest(self) -> None:
         subprocess.run(["python", str(SYNC_SCRIPT)], cwd=REPO_ROOT, check=True, text=True, capture_output=True)
         bundle_skill = (REPO_ROOT / "skill" / "SKILL.md").read_text(encoding="utf-8")
         self.assertIn("slug: skill-usefulness-audit", bundle_skill)
-        self.assertIn("version: 0.1.0", bundle_skill)
+        self.assertIn("version: 0.1.1", bundle_skill)
+        self.assertIn("审计已安装 skill 是否还有真实价值", bundle_skill)
         self.assertFalse((REPO_ROOT / "skill" / "scripts" / "__pycache__").exists())
 
     def test_output_directories_are_created(self) -> None:
