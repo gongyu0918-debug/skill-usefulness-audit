@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.0
+
+- 调用证据升级为近期使用模型，支持 `recent_30d_calls`、`recent_90d_calls`、`last_used_at`、`active_days`
+- 新增 `confidence_score`，把 usage 来源、近期字段、ablation 覆盖、community 元数据纳入证据完整度
+- 新增离线 `--community-file` 输入，支持本地 JSON、JSONL、CSV、TSV 社区指标
+- 新增静态风险扫描，输出 `risk_level`、`risk_flags`、`action`
+- Markdown 与 JSON 报告增加 `community / confidence / risk / action` 字段
+
 ## 0.1.1
 
 - 扩展输入兼容层，支持更多 usage、history、ablation 导出形态

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Audit installed skills by usage, overlap, and impact.
+Audit installed skills by usage, overlap, impact, confidence, and risk.
 """
 
 from __future__ import annotations
@@ -8,9 +8,11 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import math
 import os
 import re
 import sys
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 
@@ -121,6 +123,61 @@ COUNT_KEYS = (
     "次数",
 )
 
+RECENT_30D_KEYS = (
+    "recent_30d_calls",
+    "recent30_calls",
+    "recent_calls_30d",
+    "calls_30d",
+    "last_30d_calls",
+    "30d_calls",
+    "近30天调用",
+    "最近30天调用",
+    "近30天调用次数",
+)
+
+RECENT_90D_KEYS = (
+    "recent_90d_calls",
+    "recent90_calls",
+    "recent_calls_90d",
+    "calls_90d",
+    "last_90d_calls",
+    "90d_calls",
+    "近90天调用",
+    "最近90天调用",
+    "近90天调用次数",
+)
+
+LAST_USED_KEYS = (
+    "last_used_at",
+    "last_used",
+    "last_invoked_at",
+    "last_invocation_at",
+    "recent_use_at",
+    "上次使用时间",
+    "最后使用时间",
+    "最近使用时间",
+    "最近调用时间",
+)
+
+FIRST_SEEN_KEYS = (
+    "first_seen_at",
+    "installed_at",
+    "first_used_at",
+    "created_at",
+    "首次出现时间",
+    "安装时间",
+    "首次使用时间",
+)
+
+ACTIVE_DAYS_KEYS = (
+    "active_days",
+    "days_active",
+    "used_days",
+    "usage_days",
+    "活跃天数",
+    "使用天数",
+)
+
 COLLECTION_KEYS = {
     "skills",
     "items",
@@ -137,6 +194,8 @@ COLLECTION_KEYS = {
     "conversations",
     "threads",
     "history",
+    "community",
+    "registry",
 }
 
 SCALAR_MAP_KEYS = {
@@ -173,6 +232,35 @@ FLAT_WITHOUT_PASS_KEYS = (
     "未启用技能通过",
 )
 
+COMMUNITY_RATING_KEYS = ("rating", "score", "community_rating", "registry_rating", "评分", "社区评分")
+COMMUNITY_STARS_KEYS = ("stars", "star_count", "likes", "点赞", "收藏数")
+COMMUNITY_DOWNLOADS_KEYS = ("downloads", "download_count", "下载量", "下载次数")
+COMMUNITY_INSTALLS_CURRENT_KEYS = (
+    "installs",
+    "installs_current",
+    "active_installs",
+    "当前安装",
+    "当前安装数",
+    "安装数",
+)
+COMMUNITY_INSTALLS_ALL_TIME_KEYS = (
+    "installs_all_time",
+    "total_installs",
+    "all_time_installs",
+    "累计安装",
+    "累计安装数",
+)
+COMMUNITY_TRENDING_KEYS = ("trending_7d", "trending", "trend_score", "7日趋势", "趋势分")
+COMMUNITY_COMMENTS_KEYS = ("comments", "comments_count", "评论数", "评论数量")
+COMMUNITY_UPDATED_KEYS = (
+    "last_updated",
+    "updated_at",
+    "published_at",
+    "更新时间",
+    "最后更新时间",
+    "发布时间",
+)
+
 VERDICT_ALIASES = {
     "same": "same",
     "equal": "same",
@@ -194,6 +282,113 @@ VERDICT_ALIASES = {
     "退化": "worse",
     "变差": "worse",
 }
+
+TEXT_FILE_SUFFIXES = {
+    "",
+    ".json",
+    ".jsonl",
+    ".md",
+    ".py",
+    ".sh",
+    ".ps1",
+    ".ts",
+    ".tsx",
+    ".js",
+    ".jsx",
+    ".yaml",
+    ".yml",
+    ".toml",
+    ".ini",
+    ".cfg",
+    ".txt",
+}
+
+MAX_SCAN_BYTES = 512 * 1024
+HISTORY_EVIDENCE_WEIGHT = 0.45
+
+RISK_RULES = (
+    {
+        "label": "curl-pipe-shell",
+        "severity": 2.0,
+        "patterns": (
+            r"curl\b[^\n|]{0,300}\|\s*(?:bash|sh)\b",
+            r"wget\b[^\n|]{0,300}\|\s*(?:bash|sh)\b",
+        ),
+    },
+    {
+        "label": "dynamic-exec",
+        "severity": 2.0,
+        "patterns": (
+            r"\binvoke-expression\b",
+            r"\biex\b",
+            r"\beval\s*\(",
+            r"\bexec\s*\(",
+        ),
+    },
+    {
+        "label": "secret-access",
+        "severity": 2.0,
+        "patterns": (
+            r"\.ssh(?:[\\/]|$)",
+            r"\.aws(?:[\\/]|$)",
+            r"\.env\b",
+            r"\bid_rsa\b",
+            r"\bcredentials\b",
+        ),
+    },
+    {
+        "label": "persistence-hook",
+        "severity": 2.0,
+        "patterns": (
+            r"\bcrontab\b",
+            r"\bsystemctl\b",
+            r"\bschtasks\b",
+            r"\blaunchctl\b",
+        ),
+    },
+    {
+        "label": "external-post",
+        "severity": 1.0,
+        "patterns": (
+            r"requests\.post\s*\(",
+            r"curl\b[^\n]{0,120}-x\s+post\b",
+            r"invoke-webrequest\b[^\n]{0,120}-method\s+post\b",
+            r"method\s*:\s*[\"']post[\"']",
+        ),
+    },
+    {
+        "label": "shell-exec",
+        "severity": 1.0,
+        "patterns": (
+            r"subprocess\.(?:run|popen)\s*\(",
+            r"os\.system\s*\(",
+            r"shell\s*=\s*true",
+            r"child_process\.(?:exec|spawn)\s*\(",
+        ),
+    },
+    {
+        "label": "network-download",
+        "severity": 1.0,
+        "patterns": (
+            r"\bcurl\s+https?://",
+            r"\bwget\s+https?://",
+            r"invoke-webrequest\s+https?://",
+        ),
+    },
+    {
+        "label": "base64-payload",
+        "severity": 1.0,
+        "patterns": (
+            r"frombase64string",
+            r"base64\s+(?:-d|--decode)",
+            r"\batob\s*\(",
+        ),
+    },
+)
+
+
+def clamp(value: float, low: float, high: float) -> float:
+    return max(low, min(high, value))
 
 
 def normalize_name(value: str) -> str:
@@ -256,60 +451,54 @@ def guess_source(path: Path) -> str:
     return "other"
 
 
-def scan_skill(skill_md: Path) -> dict[str, object]:
-    root = skill_md.parent
-    text = read_text(skill_md)
-    frontmatter, body = parse_frontmatter(text)
-    name = normalize_name(frontmatter.get("name", root.name) or root.name)
-    description = frontmatter.get("description", "")
-    headings = [line.lstrip("# ").strip() for line in body.splitlines() if line.startswith("#")]
-    scripts_dir = root / "scripts"
-    references_dir = root / "references"
-    script_files = [item.name for item in scripts_dir.rglob("*") if item.is_file()] if scripts_dir.exists() else []
-    reference_files = [item.name for item in references_dir.rglob("*") if item.is_file()] if references_dir.exists() else []
-    fingerprint = " ".join(
-        [name, description, " ".join(headings), " ".join(script_files), " ".join(reference_files)]
-    )
-    return {
-        "name": name,
-        "path": str(root),
-        "source": guess_source(root),
-        "description": description,
-        "headings": headings,
-        "scripts_count": len(script_files),
-        "references_count": len(reference_files),
-        "fingerprint": fingerprint,
-        "tokens": tokenize(fingerprint),
-    }
+def parse_dateish(value) -> date | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        stamp = float(value)
+        if stamp > 1_000_000_000_000:
+            stamp = stamp / 1000.0
+        try:
+            return datetime.fromtimestamp(stamp, tz=timezone.utc).date()
+        except (OverflowError, OSError, ValueError):
+            return None
+    if not isinstance(value, str):
+        return None
 
+    text = value.strip()
+    if not text:
+        return None
 
-def discover_skill_files(roots: list[Path], include_system: bool) -> list[Path]:
-    files: list[Path] = []
-    seen: set[str] = set()
-    for root in roots:
-        if not root.exists():
+    normalized = text.replace("Z", "+00:00").replace("z", "+00:00")
+    try:
+        return datetime.fromisoformat(normalized).date()
+    except ValueError:
+        pass
+
+    for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%Y.%m.%d", "%Y-%m-%d %H:%M:%S", "%Y/%m/%d %H:%M:%S"):
+        try:
+            return datetime.strptime(text, fmt).date()
+        except ValueError:
             continue
-        for skill_md in root.rglob("SKILL.md"):
-            if not include_system and "/.system/" in skill_md.as_posix().lower():
-                continue
-            resolved = str(skill_md.resolve())
-            if resolved in seen:
-                continue
-            seen.add(resolved)
-            files.append(skill_md)
-    return sorted(files)
+    return None
 
 
-def default_roots() -> list[Path]:
-    roots: list[Path] = []
-    cwd_skills = Path.cwd() / "skills"
-    if cwd_skills.exists():
-        roots.append(cwd_skills)
-    codex_home = os.environ.get("CODEX_HOME")
-    home_skills = Path(codex_home).expanduser() / "skills" if codex_home else Path.home() / ".codex" / "skills"
-    if home_skills.exists():
-        roots.append(home_skills)
-    return roots
+def normalize_dateish(value) -> str | None:
+    parsed = parse_dateish(value)
+    if parsed is None:
+        return None
+    return parsed.isoformat()
+
+
+def days_since(value) -> int | None:
+    parsed = parse_dateish(value)
+    if parsed is None:
+        return None
+    return (date.today() - parsed).days
 
 
 def load_json_or_jsonl(path: Path):
@@ -392,25 +581,147 @@ def collect_strings(node) -> list[str]:
     return values
 
 
-def add_usage(usage: dict[str, int], name: str, value) -> None:
-    key = normalize_name(name)
-    count = coerce_int(value)
-    if not key or count is None:
-        return
-    usage[key] = usage.get(key, 0) + count
+def empty_usage_record() -> dict[str, object]:
+    return {
+        "calls": 0,
+        "recent_30d_calls": None,
+        "recent_90d_calls": None,
+        "active_days": None,
+        "first_seen_at": None,
+        "last_used_at": None,
+    }
 
 
-def consume_usage_node(node, usage: dict[str, int], hint_name: str | None = None, scalar_map: bool = False) -> None:
+def sum_optional(left: int | None, right: int | None) -> int | None:
+    if left is None:
+        return right
+    if right is None:
+        return left
+    return left + right
+
+
+def max_optional(left: int | None, right: int | None) -> int | None:
+    if left is None:
+        return right
+    if right is None:
+        return left
+    return max(left, right)
+
+
+def merge_dates(existing: str | None, incoming: str | None, pick: str) -> str | None:
+    if existing is None:
+        return incoming
+    if incoming is None:
+        return existing
+    existing_date = parse_dateish(existing)
+    incoming_date = parse_dateish(incoming)
+    if existing_date is None:
+        return incoming
+    if incoming_date is None:
+        return existing
+    if pick == "min":
+        return min(existing_date, incoming_date).isoformat()
+    return max(existing_date, incoming_date).isoformat()
+
+
+def usage_record_from_mapping(mapping: dict, hint_name: str | None = None) -> tuple[str, dict[str, object]] | None:
+    raw_name = first_present(mapping, NAME_KEYS) or hint_name
+    name = normalize_name(str(raw_name or ""))
+    if not name:
+        return None
+
+    calls = coerce_int(first_present(mapping, COUNT_KEYS))
+    recent_30d_calls = coerce_int(first_present(mapping, RECENT_30D_KEYS))
+    recent_90d_calls = coerce_int(first_present(mapping, RECENT_90D_KEYS))
+    active_days = coerce_int(first_present(mapping, ACTIVE_DAYS_KEYS))
+    first_seen_at = normalize_dateish(first_present(mapping, FIRST_SEEN_KEYS))
+    last_used_at = normalize_dateish(first_present(mapping, LAST_USED_KEYS))
+
+    if calls is None and recent_90d_calls is not None:
+        calls = recent_90d_calls
+    if calls is None and recent_30d_calls is not None:
+        calls = recent_30d_calls
+
+    has_any_field = any(
+        value is not None
+        for value in (calls, recent_30d_calls, recent_90d_calls, active_days, first_seen_at, last_used_at)
+    )
+    if not has_any_field:
+        return None
+
+    return (
+        name,
+        {
+            "calls": max(0, calls or 0),
+            "recent_30d_calls": recent_30d_calls,
+            "recent_90d_calls": recent_90d_calls,
+            "active_days": active_days,
+            "first_seen_at": first_seen_at,
+            "last_used_at": last_used_at,
+        },
+    )
+
+
+def merge_usage_record(store: dict[str, dict[str, object]], name: str, incoming: dict[str, object]) -> None:
+    target = store.setdefault(name, empty_usage_record())
+    target["calls"] = int(target.get("calls", 0)) + int(incoming.get("calls", 0) or 0)
+    target["recent_30d_calls"] = sum_optional(
+        coerce_int(target.get("recent_30d_calls")),
+        coerce_int(incoming.get("recent_30d_calls")),
+    )
+    target["recent_90d_calls"] = sum_optional(
+        coerce_int(target.get("recent_90d_calls")),
+        coerce_int(incoming.get("recent_90d_calls")),
+    )
+    target["active_days"] = max_optional(
+        coerce_int(target.get("active_days")),
+        coerce_int(incoming.get("active_days")),
+    )
+    target["first_seen_at"] = merge_dates(
+        target.get("first_seen_at"),  # type: ignore[arg-type]
+        incoming.get("first_seen_at"),  # type: ignore[arg-type]
+        "min",
+    )
+    target["last_used_at"] = merge_dates(
+        target.get("last_used_at"),  # type: ignore[arg-type]
+        incoming.get("last_used_at"),  # type: ignore[arg-type]
+        "max",
+    )
+
+
+def consume_usage_node(
+    node,
+    usage: dict[str, dict[str, object]],
+    hint_name: str | None = None,
+    scalar_map: bool = False,
+) -> None:
     if isinstance(node, list):
         for item in node:
             consume_usage_node(item, usage, hint_name=hint_name, scalar_map=scalar_map)
         return
 
     if isinstance(node, dict):
-        name = first_present(node, NAME_KEYS)
-        count = first_present(node, COUNT_KEYS)
-        if name is not None and count is not None:
-            add_usage(usage, str(name), count)
+        record = usage_record_from_mapping(node, hint_name=hint_name if scalar_map else None)
+        if record:
+            name, payload = record
+            merge_usage_record(usage, name, payload)
+            return
+
+        scalar_items = []
+        for key, value in node.items():
+            key_text = str(key)
+            key_norm = normalize_name(key_text)
+            if key_text in COLLECTION_KEYS or key_norm in COLLECTION_KEYS:
+                scalar_items = []
+                break
+            count = coerce_int(value)
+            if count is None:
+                scalar_items = []
+                break
+            scalar_items.append((key_text, count))
+        if scalar_items:
+            for key_text, count in scalar_items:
+                merge_usage_record(usage, normalize_name(key_text), {"calls": count})
             return
 
         for key, value in node.items():
@@ -418,38 +729,47 @@ def consume_usage_node(node, usage: dict[str, int], hint_name: str | None = None
             key_norm = normalize_name(key_text)
             next_scalar_map = scalar_map or key_text in SCALAR_MAP_KEYS or key_norm in SCALAR_MAP_KEYS
             child_hint = hint_name
+            if not next_scalar_map and isinstance(value, dict) and key_text not in COLLECTION_KEYS and key_norm not in COLLECTION_KEYS:
+                nested_record = usage_record_from_mapping(value, hint_name=key_text)
+                if nested_record:
+                    name, payload = nested_record
+                    merge_usage_record(usage, name, payload)
+                    continue
             if next_scalar_map and key_text not in COLLECTION_KEYS and key_norm not in COLLECTION_KEYS:
                 child_hint = key_text
             consume_usage_node(value, usage, hint_name=child_hint, scalar_map=next_scalar_map)
         return
 
     if scalar_map and hint_name is not None:
-        add_usage(usage, hint_name, node)
+        count = coerce_int(node)
+        if count is None:
+            return
+        merge_usage_record(usage, normalize_name(hint_name), {"calls": count})
 
 
-def load_usage_csv(path: Path) -> dict[str, int]:
-    usage: dict[str, int] = {}
+def load_usage_csv(path: Path) -> dict[str, dict[str, object]]:
+    usage: dict[str, dict[str, object]] = {}
     delimiter = "\t" if path.suffix.lower() == ".tsv" else ","
     with path.open("r", encoding="utf-8", errors="replace", newline="") as handle:
         reader = csv.DictReader(handle, delimiter=delimiter)
         for row in reader:
-            add_usage(
-                usage,
-                str(first_present(row, NAME_KEYS) or ""),
-                first_present(row, COUNT_KEYS),
-            )
+            record = usage_record_from_mapping(row)
+            if record is None:
+                continue
+            name, payload = record
+            merge_usage_record(usage, name, payload)
     return usage
 
 
-def load_usage_json(path: Path) -> dict[str, int]:
-    usage: dict[str, int] = {}
+def load_usage_json(path: Path) -> dict[str, dict[str, object]]:
+    usage: dict[str, dict[str, object]] = {}
     payload = load_json_or_jsonl(path)
     consume_usage_node(payload, usage)
     return usage
 
 
-def load_usage(paths: list[Path]) -> dict[str, int]:
-    usage: dict[str, int] = {}
+def load_usage(paths: list[Path]) -> dict[str, dict[str, object]]:
+    usage: dict[str, dict[str, object]] = {}
     for path in paths:
         if not path.exists():
             continue
@@ -458,12 +778,12 @@ def load_usage(paths: list[Path]) -> dict[str, int]:
         else:
             parsed = load_usage_json(path)
         for key, value in parsed.items():
-            usage[key] = usage.get(key, 0) + value
+            merge_usage_record(usage, key, value)
     return usage
 
 
-def infer_usage_from_history(paths: list[Path], skill_names: list[str]) -> dict[str, int]:
-    usage = {name: 0 for name in skill_names}
+def infer_usage_from_history(paths: list[Path], skill_names: list[str]) -> dict[str, dict[str, object]]:
+    usage = {name: {"calls": 0} for name in skill_names}
     patterns = {
         name: re.compile(rf"(?<![a-z0-9])\$?{re.escape(name)}(?![a-z0-9])", re.IGNORECASE)
         for name in skill_names
@@ -480,17 +800,8 @@ def infer_usage_from_history(paths: list[Path], skill_names: list[str]) -> dict[
         else:
             text = read_text(path).lower()
         for name, pattern in patterns.items():
-            usage[name] += len(pattern.findall(text))
+            usage[name]["calls"] = int(usage[name]["calls"]) + len(pattern.findall(text))
     return usage
-
-
-def get_nested(entry: dict, *keys: str):
-    current = entry
-    for key in keys:
-        if not isinstance(current, dict):
-            return None
-        current = current.get(key)
-    return current
 
 
 def pick_arm(entry: dict, keys: tuple[str, ...]) -> dict:
@@ -614,6 +925,271 @@ def load_ablation(paths: list[Path]) -> dict[str, dict[str, float]]:
     return summary
 
 
+def empty_community_record() -> dict[str, object]:
+    return {
+        "rating": None,
+        "stars": None,
+        "downloads": None,
+        "installs_current": None,
+        "installs_all_time": None,
+        "trending_7d": None,
+        "comments_count": None,
+        "last_updated": None,
+    }
+
+
+def normalize_rating(value) -> float | None:
+    rating = coerce_float(value)
+    if rating is None:
+        return None
+    if 0.0 <= rating <= 1.0:
+        rating = rating * 5.0
+    return rating
+
+
+def community_record_from_mapping(mapping: dict, hint_name: str | None = None) -> tuple[str, dict[str, object]] | None:
+    raw_name = first_present(mapping, NAME_KEYS) or hint_name
+    name = normalize_name(str(raw_name or ""))
+    if not name:
+        return None
+
+    record = {
+        "rating": normalize_rating(first_present(mapping, COMMUNITY_RATING_KEYS)),
+        "stars": coerce_int(first_present(mapping, COMMUNITY_STARS_KEYS)),
+        "downloads": coerce_int(first_present(mapping, COMMUNITY_DOWNLOADS_KEYS)),
+        "installs_current": coerce_int(first_present(mapping, COMMUNITY_INSTALLS_CURRENT_KEYS)),
+        "installs_all_time": coerce_int(first_present(mapping, COMMUNITY_INSTALLS_ALL_TIME_KEYS)),
+        "trending_7d": coerce_int(first_present(mapping, COMMUNITY_TRENDING_KEYS)),
+        "comments_count": coerce_int(first_present(mapping, COMMUNITY_COMMENTS_KEYS)),
+        "last_updated": normalize_dateish(first_present(mapping, COMMUNITY_UPDATED_KEYS)),
+    }
+    if not any(value is not None for value in record.values()):
+        return None
+    return name, record
+
+
+def merge_community_record(store: dict[str, dict[str, object]], name: str, incoming: dict[str, object]) -> None:
+    target = store.setdefault(name, empty_community_record())
+    for key in ("stars", "downloads", "installs_current", "installs_all_time", "trending_7d", "comments_count"):
+        target[key] = max_optional(coerce_int(target.get(key)), coerce_int(incoming.get(key)))
+    target["rating"] = coerce_float(incoming.get("rating")) if incoming.get("rating") is not None else target.get("rating")
+    target["last_updated"] = merge_dates(
+        target.get("last_updated"),  # type: ignore[arg-type]
+        incoming.get("last_updated"),  # type: ignore[arg-type]
+        "max",
+    )
+
+
+def consume_community_node(node, community: dict[str, dict[str, object]], hint_name: str | None = None) -> None:
+    if isinstance(node, list):
+        for item in node:
+            consume_community_node(item, community, hint_name=hint_name)
+        return
+
+    if isinstance(node, dict):
+        record = community_record_from_mapping(node, hint_name=hint_name)
+        if record:
+            name, payload = record
+            merge_community_record(community, name, payload)
+            return
+
+        for key, value in node.items():
+            key_text = str(key)
+            key_norm = normalize_name(key_text)
+            child_hint = None
+            if key_text not in COLLECTION_KEYS and key_norm not in COLLECTION_KEYS and isinstance(value, dict):
+                child_hint = key_text
+            consume_community_node(value, community, hint_name=child_hint)
+
+
+def load_community_csv(path: Path) -> dict[str, dict[str, object]]:
+    community: dict[str, dict[str, object]] = {}
+    delimiter = "\t" if path.suffix.lower() == ".tsv" else ","
+    with path.open("r", encoding="utf-8", errors="replace", newline="") as handle:
+        reader = csv.DictReader(handle, delimiter=delimiter)
+        for row in reader:
+            record = community_record_from_mapping(row)
+            if record is None:
+                continue
+            name, payload = record
+            merge_community_record(community, name, payload)
+    return community
+
+
+def load_community_json(path: Path) -> dict[str, dict[str, object]]:
+    community: dict[str, dict[str, object]] = {}
+    payload = load_json_or_jsonl(path)
+    consume_community_node(payload, community)
+    return community
+
+
+def load_community(paths: list[Path]) -> dict[str, dict[str, object]]:
+    community: dict[str, dict[str, object]] = {}
+    for path in paths:
+        if not path.exists():
+            continue
+        if path.suffix.lower() in {".csv", ".tsv"}:
+            parsed = load_community_csv(path)
+        else:
+            parsed = load_community_json(path)
+        for key, value in parsed.items():
+            merge_community_record(community, key, value)
+    return community
+
+
+def community_prior_score(entry: dict[str, object] | None) -> tuple[float | None, float | None]:
+    if not entry:
+        return None, None
+
+    score = 0.0
+    confidence = 0.0
+    rating = coerce_float(entry.get("rating"))
+    if rating is not None:
+        score += clamp(rating / 5.0, 0.0, 1.0) * 0.35
+        confidence += 0.20
+
+    volume = coerce_int(entry.get("installs_current"))
+    if volume is None:
+        volume = coerce_int(entry.get("downloads"))
+    if volume is not None:
+        score += clamp(math.log1p(volume) / math.log1p(5000), 0.0, 1.0) * 0.25
+        confidence += 0.20
+
+    trending = coerce_int(entry.get("trending_7d"))
+    if trending is not None:
+        score += clamp(math.log1p(trending) / math.log1p(250), 0.0, 1.0) * 0.20
+        confidence += 0.20
+
+    stars = coerce_int(entry.get("stars"))
+    if stars is not None:
+        score += clamp(math.log1p(stars) / math.log1p(250), 0.0, 1.0) * 0.10
+        confidence += 0.15
+
+    last_updated_days = days_since(entry.get("last_updated"))
+    if last_updated_days is not None:
+        if last_updated_days <= 180:
+            maintenance = 1.0
+        elif last_updated_days <= 365:
+            maintenance = 0.7
+        elif last_updated_days <= 730:
+            maintenance = 0.4
+        else:
+            maintenance = 0.1
+        score += maintenance * 0.10
+        confidence += 0.15
+
+    return round(clamp(score, 0.0, 1.0), 2), round(clamp(confidence, 0.0, 1.0), 2)
+
+
+def scan_risk(root: Path) -> dict[str, object]:
+    hits: dict[str, dict[str, object]] = {}
+    for path in root.rglob("*"):
+        if not path.is_file():
+            continue
+        if "__pycache__" in path.parts:
+            continue
+        if path.name != "SKILL.md" and path.suffix.lower() not in TEXT_FILE_SUFFIXES:
+            continue
+        try:
+            if path.stat().st_size > MAX_SCAN_BYTES:
+                continue
+        except OSError:
+            continue
+        text = read_text(path).lower()
+        relative = str(path.relative_to(root))
+        for rule in RISK_RULES:
+            if any(re.search(pattern, text, flags=re.IGNORECASE | re.MULTILINE) for pattern in rule["patterns"]):
+                hit = hits.setdefault(
+                    str(rule["label"]),
+                    {"severity": float(rule["severity"]), "files": []},
+                )
+                files = hit["files"]
+                if isinstance(files, list) and relative not in files and len(files) < 3:
+                    files.append(relative)
+
+    risk_score = round(sum(float(item["severity"]) for item in hits.values()), 2)
+    if risk_score >= 4.0:
+        risk_level = "high"
+    elif risk_score >= 2.0:
+        risk_level = "medium"
+    elif risk_score > 0:
+        risk_level = "low"
+    else:
+        risk_level = "none"
+
+    evidence = [
+        {"label": label, "severity": item["severity"], "files": item["files"]}
+        for label, item in sorted(hits.items())
+    ]
+    return {
+        "risk_score": risk_score,
+        "risk_level": risk_level,
+        "risk_flags": [item["label"] for item in evidence],
+        "risk_evidence": evidence,
+    }
+
+
+def scan_skill(skill_md: Path) -> dict[str, object]:
+    root = skill_md.parent
+    text = read_text(skill_md)
+    frontmatter, body = parse_frontmatter(text)
+    name = normalize_name(frontmatter.get("name", root.name) or root.name)
+    description = frontmatter.get("description", "")
+    headings = [line.lstrip("# ").strip() for line in body.splitlines() if line.startswith("#")]
+    scripts_dir = root / "scripts"
+    references_dir = root / "references"
+    script_files = [item.name for item in scripts_dir.rglob("*") if item.is_file()] if scripts_dir.exists() else []
+    reference_files = [item.name for item in references_dir.rglob("*") if item.is_file()] if references_dir.exists() else []
+    fingerprint = " ".join(
+        [name, description, " ".join(headings), " ".join(script_files), " ".join(reference_files)]
+    )
+    risk = scan_risk(root)
+    return {
+        "name": name,
+        "path": str(root),
+        "source": guess_source(root),
+        "description": description,
+        "headings": headings,
+        "scripts_count": len(script_files),
+        "references_count": len(reference_files),
+        "fingerprint": fingerprint,
+        "tokens": tokenize(fingerprint),
+        "risk_score": risk["risk_score"],
+        "risk_level": risk["risk_level"],
+        "risk_flags": risk["risk_flags"],
+        "risk_evidence": risk["risk_evidence"],
+    }
+
+
+def discover_skill_files(roots: list[Path], include_system: bool) -> list[Path]:
+    files: list[Path] = []
+    seen: set[str] = set()
+    for root in roots:
+        if not root.exists():
+            continue
+        for skill_md in root.rglob("SKILL.md"):
+            if not include_system and "/.system/" in skill_md.as_posix().lower():
+                continue
+            resolved = str(skill_md.resolve())
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            files.append(skill_md)
+    return sorted(files)
+
+
+def default_roots() -> list[Path]:
+    roots: list[Path] = []
+    cwd_skills = Path.cwd() / "skills"
+    if cwd_skills.exists():
+        roots.append(cwd_skills)
+    codex_home = os.environ.get("CODEX_HOME")
+    home_skills = Path(codex_home).expanduser() / "skills" if codex_home else Path.home() / ".codex" / "skills"
+    if home_skills.exists():
+        roots.append(home_skills)
+    return roots
+
+
 def classify_skill(skill: dict[str, object]) -> str:
     tokens = set(skill["tokens"])
     if tokens & API_STRONG_KEYWORDS:
@@ -627,14 +1203,66 @@ def classify_skill(skill: dict[str, object]) -> str:
     return "general"
 
 
-def usage_score(calls: int) -> float:
-    if calls <= 0:
-        return 0.0
-    if calls <= 2:
+def usage_evidence_weight(source: str) -> float:
+    if source == "usage":
         return 1.0
-    if calls <= 9:
-        return 2.0
-    return 3.0
+    if source == "history":
+        return HISTORY_EVIDENCE_WEIGHT
+    return 0.0
+
+
+def usage_score(usage_record: dict[str, object], evidence_weight: float) -> float:
+    if evidence_weight <= 0:
+        return 0.0
+
+    calls = int(usage_record.get("calls", 0) or 0)
+    recent_30d_calls = coerce_int(usage_record.get("recent_30d_calls"))
+    recent_90d_calls = coerce_int(usage_record.get("recent_90d_calls"))
+    active_days = coerce_int(usage_record.get("active_days"))
+    last_used_days = days_since(usage_record.get("last_used_at"))
+
+    if recent_30d_calls is not None:
+        if recent_30d_calls >= 8:
+            base = 3.0
+        elif recent_30d_calls >= 3:
+            base = 2.0
+        elif recent_30d_calls >= 1:
+            base = 1.0
+        else:
+            base = 0.0
+    elif recent_90d_calls is not None:
+        if recent_90d_calls >= 10:
+            base = 2.5
+        elif recent_90d_calls >= 3:
+            base = 1.5
+        elif recent_90d_calls >= 1:
+            base = 0.75
+        else:
+            base = 0.0
+    elif calls <= 0:
+        base = 0.0
+    elif calls <= 2:
+        base = 1.0
+    elif calls <= 9:
+        base = 2.0
+    else:
+        base = 3.0
+
+    if last_used_days is not None:
+        if last_used_days <= 7:
+            base += 0.5
+        elif last_used_days <= 30:
+            base += 0.25
+        elif last_used_days > 180:
+            base -= 0.5
+
+    if active_days is not None:
+        if active_days >= 10:
+            base += 0.25
+        elif active_days >= 3:
+            base += 0.10
+
+    return round(clamp(base * evidence_weight, 0.0, 3.0), 2)
 
 
 def uniqueness_score(overlap: float) -> float:
@@ -692,6 +1320,40 @@ def impact_score(
     return max(0.0, min(4.0, round(score, 2)))
 
 
+def confidence_score(
+    usage_source: str,
+    usage_record: dict[str, object],
+    kind: str,
+    ablation: dict[str, float] | None,
+    community_entry: dict[str, object] | None,
+    skill_count: int,
+) -> float:
+    score = 0.0
+    if usage_source == "usage":
+        score += 0.35
+    elif usage_source == "history":
+        score += 0.15
+
+    if usage_record.get("recent_30d_calls") is not None or usage_record.get("last_used_at") is not None:
+        score += 0.20
+    elif int(usage_record.get("calls", 0) or 0) > 0 and usage_source == "usage":
+        score += 0.10
+
+    if kind == "general":
+        cases = int((ablation or {}).get("cases", 0))
+        if cases >= 5:
+            score += 0.25
+        elif cases >= 1:
+            score += 0.15
+    else:
+        score += 0.25
+
+    score += 0.10 if skill_count > 1 else 0.05
+    if community_entry:
+        score += 0.10
+    return round(clamp(score, 0.0, 1.0), 2)
+
+
 def verdict(total: float) -> str:
     if total >= 8.0:
         return "keep"
@@ -704,28 +1366,86 @@ def verdict(total: float) -> str:
     return "delete"
 
 
-def delete_trigger(source: str, kind: str, total: float, calls: int, overlap: float) -> str | None:
+def recommend_action(
+    source: str,
+    kind: str,
+    total: float,
+    confidence: float,
+    risk_level: str,
+    calls: int,
+    overlap: float,
+    community_prior: float | None,
+) -> tuple[str, str, bool]:
     if source == "system":
-        return None
+        if risk_level == "high":
+            return "review-system", "system skill with high-risk patterns", False
+        return "keep-system", "system skill", False
+
+    if risk_level == "high":
+        return "quarantine-review", "high-risk patterns require manual review", False
+    if risk_level == "medium" and total >= 6.0:
+        return "keep-review-risk", "useful locally with medium-risk patterns", False
+
+    if total >= 8.0:
+        return "keep", "high local score", False
+    if total >= 6.0:
+        if overlap >= 0.65 and calls <= 1:
+            return "keep-narrow", "high overlap suggests narrower scope", False
+        return "keep-narrow", "good local score", False
+
+    if confidence < 0.55:
+        return "observe-30d", "evidence confidence is low", False
+
+    if risk_level == "medium":
+        return "review-risk", "medium-risk patterns require review", False
+
+    if total >= 4.5:
+        if overlap >= 0.65:
+            return "merge-or-review", "mid score with high overlap", False
+        if community_prior is not None and community_prior >= 0.6:
+            return "review-vs-community", "community signal is stronger than local score", False
+        return "review", "mid local score", False
+
     if kind in {"api", "tool"}:
-        if total < 4.0 and calls == 0 and overlap >= 0.75:
-            return "unused duplicate protected skill"
-        return None
+        if calls == 0 and overlap >= 0.75:
+            return "merge-delete", "unused duplicate protected skill", True
+        if community_prior is not None and community_prior >= 0.6:
+            return "review-vs-community", "protected skill has strong community signal", False
+        return "merge-or-review", "protected skill scores low locally", False
+
+    if community_prior is not None and community_prior >= 0.6:
+        return "review-vs-community", "community signal suggests benchmark before removal", False
     if total < 3.0:
-        return "very low total score"
-    if total < 4.5 and overlap >= 0.65 and calls <= 1:
-        return "low usage plus high overlap"
-    return None
+        return "delete", "very low local score", True
+    if overlap >= 0.65 and calls <= 1:
+        return "merge-delete", "low usage plus high overlap", True
+    return "merge-delete", "low local score", True
+
+
+def short_risk_flags(flags: list[str]) -> str:
+    if not flags:
+        return ""
+    return ",".join(flags[:2])
 
 
 def build_basis(
-    calls: int,
+    usage_record: dict[str, object],
+    usage_source: str,
+    evidence_weight: float,
     overlap_peer: str | None,
     overlap_value: float,
     kind: str,
     ablation: dict[str, float] | None,
+    community_prior: float | None,
+    risk_flags: list[str],
 ) -> str:
-    parts = [f"calls={calls}"]
+    parts = [f"calls={int(usage_record.get('calls', 0) or 0)}"]
+    recent_30d_calls = coerce_int(usage_record.get("recent_30d_calls"))
+    if recent_30d_calls is not None:
+        parts.append(f"30d={recent_30d_calls}")
+    if usage_record.get("last_used_at"):
+        parts.append(f"last={usage_record['last_used_at']}")
+    parts.append(f"usage={usage_source}@{evidence_weight:.2f}")
     if overlap_peer:
         parts.append(f"overlap={overlap_peer}({overlap_value:.2f})")
     if kind == "general":
@@ -736,6 +1456,10 @@ def build_basis(
             parts.append("ablation=missing")
     else:
         parts.append("impact=protected-capability")
+    if community_prior is not None:
+        parts.append(f"community={community_prior:.2f}")
+    if risk_flags:
+        parts.append(f"risk={short_risk_flags(risk_flags)}")
     return "; ".join(parts)
 
 
@@ -743,6 +1467,16 @@ def markdown_table(headers: list[str], rows: list[list[str]]) -> str:
     lines = ["| " + " | ".join(headers) + " |", "| " + " | ".join(["---"] * len(headers)) + " |"]
     lines.extend("| " + " | ".join(row) + " |" for row in rows)
     return "\n".join(lines)
+
+
+def fmt_optional_int(value) -> str:
+    coerced = coerce_int(value)
+    return "-" if coerced is None else str(coerced)
+
+
+def fmt_optional_float(value, digits: int = 2) -> str:
+    coerced = coerce_float(value)
+    return "-" if coerced is None else f"{coerced:.{digits}f}"
 
 
 def run_audit(args: argparse.Namespace) -> int:
@@ -759,10 +1493,12 @@ def run_audit(args: argparse.Namespace) -> int:
     usage_paths = [Path(item).expanduser().resolve() for item in (args.usage_file or [])]
     history_paths = [Path(item).expanduser().resolve() for item in (args.history_file or [])]
     ablation_paths = [Path(item).expanduser().resolve() for item in (args.ablation_file or [])]
+    community_paths = [Path(item).expanduser().resolve() for item in (args.community_file or [])]
 
     usage = load_usage(usage_paths) if usage_paths else {}
     history_usage = infer_usage_from_history(history_paths, names) if history_paths else {}
     ablation = load_ablation(ablation_paths) if ablation_paths else {}
+    community = load_community(community_paths) if community_paths else {}
 
     results: list[dict[str, object]] = []
     for skill in skills:
@@ -777,18 +1513,40 @@ def run_audit(args: argparse.Namespace) -> int:
                 best_overlap = overlap
                 best_peer = str(other["name"])
 
-        calls = usage.get(skill["name"])
+        usage_record = usage.get(str(skill["name"]))
         usage_source = "usage"
-        if calls is None:
-            calls = history_usage.get(skill["name"], 0)
+        if usage_record is None:
+            usage_record = history_usage.get(str(skill["name"]), {"calls": 0})
             usage_source = "history" if history_paths else "missing"
 
-        ablation_summary = ablation.get(skill["name"])
-        u_score = usage_score(calls)
+        evidence_weight = usage_evidence_weight(usage_source)
+        calls = int(usage_record.get("calls", 0) or 0)
+        ablation_summary = ablation.get(str(skill["name"]))
+        community_entry = community.get(str(skill["name"]))
+        community_prior, community_conf = community_prior_score(community_entry)
+
+        u_score = usage_score(usage_record, evidence_weight)
         uniq_score = uniqueness_score(best_overlap)
         i_score = impact_score(kind, calls, best_overlap, skill, ablation_summary)
         total = round(u_score + uniq_score + i_score, 2)
-        trigger = delete_trigger(str(skill["source"]), kind, total, calls, best_overlap)
+        confidence = confidence_score(
+            usage_source,
+            usage_record,
+            kind,
+            ablation_summary,
+            community_entry,
+            len(skills),
+        )
+        action, action_reason, delete_candidate = recommend_action(
+            str(skill["source"]),
+            kind,
+            total,
+            confidence,
+            str(skill["risk_level"]),
+            calls,
+            best_overlap,
+            community_prior,
+        )
 
         results.append(
             {
@@ -797,28 +1555,60 @@ def run_audit(args: argparse.Namespace) -> int:
                 "kind": kind,
                 "path": skill["path"],
                 "calls": calls,
+                "recent_30d_calls": coerce_int(usage_record.get("recent_30d_calls")),
+                "recent_90d_calls": coerce_int(usage_record.get("recent_90d_calls")),
+                "active_days": coerce_int(usage_record.get("active_days")),
+                "first_seen_at": usage_record.get("first_seen_at"),
+                "last_used_at": usage_record.get("last_used_at"),
                 "usage_source": usage_source,
+                "evidence_weight": evidence_weight,
                 "usage_score": u_score,
                 "uniqueness_score": uniq_score,
                 "impact_score": i_score,
+                "local_score": total,
                 "total_score": total,
+                "confidence_score": confidence,
                 "verdict": verdict(total),
-                "delete_candidate": bool(trigger),
-                "delete_trigger": trigger,
+                "action": action,
+                "action_reason": action_reason,
+                "delete_candidate": delete_candidate,
+                "delete_trigger": action_reason if delete_candidate else None,
                 "overlap_peer": best_peer,
                 "overlap_value": round(best_overlap, 2),
-                "basis": build_basis(calls, best_peer, best_overlap, kind, ablation_summary),
+                "community": community_entry,
+                "community_prior_score": community_prior,
+                "community_confidence": community_conf,
+                "risk_level": skill["risk_level"],
+                "risk_score": skill["risk_score"],
+                "risk_flags": skill["risk_flags"],
+                "risk_evidence": skill["risk_evidence"],
+                "basis": build_basis(
+                    usage_record,
+                    usage_source,
+                    evidence_weight,
+                    best_peer,
+                    best_overlap,
+                    kind,
+                    ablation_summary,
+                    community_prior,
+                    list(skill["risk_flags"]),
+                ),
                 "missing_usage": usage_source == "missing",
                 "missing_ablation": kind == "general" and not ablation_summary,
+                "missing_community": bool(community_paths) and community_entry is None,
             }
         )
 
-    ranked = sorted(results, key=lambda item: (-float(item["total_score"]), str(item["name"])))
+    ranked = sorted(results, key=lambda item: (-float(item["local_score"]), str(item["name"])))
+    recommended_actions = sorted(
+        [item for item in ranked if str(item["action"]) not in {"keep", "keep-narrow", "keep-system"}],
+        key=lambda item: (str(item["action"]), float(item["local_score"]), str(item["name"])),
+    )
     delete_candidates = sorted(
         [item for item in ranked if item["delete_candidate"]],
-        key=lambda item: (float(item["total_score"]), str(item["name"])),
+        key=lambda item: (float(item["local_score"]), str(item["name"])),
     )
-    missing = [item for item in ranked if item["missing_usage"] or item["missing_ablation"]]
+    missing = [item for item in ranked if item["missing_usage"] or item["missing_ablation"] or item["missing_community"]]
 
     score_rows = []
     for index, item in enumerate(ranked, start=1):
@@ -829,11 +1619,16 @@ def run_audit(args: argparse.Namespace) -> int:
                 str(item["source"]),
                 str(item["kind"]),
                 str(item["calls"]),
+                fmt_optional_int(item["recent_30d_calls"]),
                 f"{item['usage_score']:.1f}",
                 f"{item['uniqueness_score']:.1f}",
                 f"{item['impact_score']:.1f}",
-                f"{item['total_score']:.1f}",
+                fmt_optional_float(item["community_prior_score"]),
+                fmt_optional_float(item["confidence_score"]),
+                str(item["risk_level"]),
+                f"{item['local_score']:.1f}",
                 str(item["verdict"]),
+                str(item["action"]),
                 str(item["basis"]),
             ]
         )
@@ -845,22 +1640,63 @@ def run_audit(args: argparse.Namespace) -> int:
         f"- Usage files: {len(usage_paths)}",
         f"- History files: {len(history_paths)}",
         f"- Ablation files: {len(ablation_paths)}",
+        f"- Community files: {len(community_paths)}",
+        f"- Recommended actions: {len(recommended_actions)}",
         f"- Delete candidates: {len(delete_candidates)}",
         "",
         "## Score Table",
         "",
         markdown_table(
-            ["Rank", "Skill", "Source", "Kind", "Calls", "Usage", "Unique", "Impact", "Total", "Verdict", "Basis"],
+            [
+                "Rank",
+                "Skill",
+                "Source",
+                "Kind",
+                "Calls",
+                "Recent30",
+                "Usage",
+                "Unique",
+                "Impact",
+                "Comm",
+                "Conf",
+                "Risk",
+                "Total",
+                "Verdict",
+                "Action",
+                "Basis",
+            ],
             score_rows,
         ),
     ]
+
+    if recommended_actions:
+        action_rows = [
+            [
+                str(item["name"]),
+                f"{item['local_score']:.1f}",
+                fmt_optional_float(item["confidence_score"]),
+                str(item["risk_level"]),
+                str(item["action"]),
+                str(item["action_reason"]),
+            ]
+            for item in recommended_actions
+        ]
+        report_parts.extend(
+            [
+                "",
+                "## Recommended Actions",
+                "",
+                markdown_table(["Skill", "Total", "Confidence", "Risk", "Action", "Reason"], action_rows),
+            ]
+        )
 
     if delete_candidates:
         delete_rows = [
             [
                 str(item["name"]),
-                f"{item['total_score']:.1f}",
+                f"{item['local_score']:.1f}",
                 str(item["kind"]),
+                str(item["action"]),
                 str(item["delete_trigger"]),
                 str(item["basis"]),
             ]
@@ -871,7 +1707,7 @@ def run_audit(args: argparse.Namespace) -> int:
                 "",
                 "## Delete Candidates",
                 "",
-                markdown_table(["Skill", "Total", "Kind", "Trigger", "Reason"], delete_rows),
+                markdown_table(["Skill", "Total", "Kind", "Action", "Trigger", "Reason"], delete_rows),
             ]
         )
 
@@ -883,6 +1719,8 @@ def run_audit(args: argparse.Namespace) -> int:
                 gaps.append("usage")
             if item["missing_ablation"]:
                 gaps.append("ablation")
+            if item["missing_community"]:
+                gaps.append("community")
             missing_rows.append([str(item["name"]), str(item["kind"]), ", ".join(gaps)])
         report_parts.extend(
             [
@@ -905,6 +1743,11 @@ def run_audit(args: argparse.Namespace) -> int:
     if args.json_out:
         payload = {
             "skills_audited": len(ranked),
+            "usage_files": len(usage_paths),
+            "history_files": len(history_paths),
+            "ablation_files": len(ablation_paths),
+            "community_files": len(community_paths),
+            "recommended_actions": len(recommended_actions),
             "delete_candidates": len(delete_candidates),
             "results": ranked,
         }
@@ -924,9 +1767,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     audit_parser = subparsers.add_parser("audit", help="Audit skills and render a report.")
     audit_parser.add_argument("--skills-root", action="append", help="Root directory containing skill folders.")
-    audit_parser.add_argument("--usage-file", action="append", help="JSON/JSONL/CSV/TSV file with usage counts.")
+    audit_parser.add_argument("--usage-file", action="append", help="JSON/JSONL/CSV/TSV file with usage evidence.")
     audit_parser.add_argument("--history-file", action="append", help="Transcript export used for mention fallback.")
     audit_parser.add_argument("--ablation-file", action="append", help="JSON or JSONL file with ablation cases.")
+    audit_parser.add_argument("--community-file", action="append", help="Offline JSON/JSONL/CSV/TSV file with registry metrics.")
     audit_parser.add_argument("--markdown-out", help="Write the Markdown report to this file.")
     audit_parser.add_argument("--json-out", help="Write machine-readable JSON output to this file.")
     audit_parser.add_argument("--include-system", action="store_true", help="Include system skills during discovery.")

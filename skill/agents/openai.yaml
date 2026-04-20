@@ -1,6 +1,6 @@
 interface:
   display_name: "Skill Usefulness Audit"
-  short_description: "Audit installed skills / 审计已装技能"
-  default_prompt: "Use $skill-usefulness-audit to score installed skills and recommend removals. / 用 $skill-usefulness-audit 给已装技能打分并给出删减建议。"
+  short_description: "Audit installed skills with confidence and risk / 审计已装技能的评分、置信度与风险"
+  default_prompt: "Use $skill-usefulness-audit to score installed skills, weigh evidence confidence, scan risk, and recommend keep/review/delete actions. / 用 $skill-usefulness-audit 给已装技能打分，评估证据置信度，扫描风险，并给出保留、复核或删除动作建议。"
 policy:
   allow_implicit_invocation: false

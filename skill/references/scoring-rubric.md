@@ -1,26 +1,68 @@
 # Scoring Rubric
 
-Score every skill on a `0.0-10.0` scale.
+Score each skill with one local 10-point score and three side signals.
 
-## Formula
+## Core Outputs
 
-`total_score = usage_score + uniqueness_score + impact_score`
-
+- `local_score = usage_score + uniqueness_score + impact_score`
 - `usage_score`: `0.0-3.0`
 - `uniqueness_score`: `0.0-3.0`
 - `impact_score`: `0.0-4.0`
+- `confidence_score`: `0.0-1.0`
+- `community_prior_score`: `0.0-1.0`
+- `risk_level`: `none / low / medium / high`
+
+Keep `community_prior_score` and `risk_level` separate from `local_score`.
+Use them to shape review priority and final action.
 
 ## 1. Usage Score (`0.0-3.0`)
 
-Use direct invocation counts when available.
-Use transcript mentions only as fallback evidence.
+Prefer direct host usage logs.
+Use transcript mentions only as weaker fallback evidence.
 
-Buckets:
+### Input Fields
 
-- `0.0`: `0` calls
-- `1.0`: `1-2` calls
-- `2.0`: `3-9` calls
-- `3.0`: `10+` calls
+- `calls`
+- `recent_30d_calls`
+- `recent_90d_calls`
+- `last_used_at`
+- `active_days`
+- `usage_source`
+- `evidence_weight`
+
+### Base Usage Strength
+
+- When `recent_30d_calls` exists:
+  - `0.0`: `0`
+  - `1.0`: `1-2`
+  - `2.0`: `3-7`
+  - `3.0`: `8+`
+- When only `recent_90d_calls` exists:
+  - `0.0`: `0`
+  - `0.75`: `1-2`
+  - `1.5`: `3-9`
+  - `2.5`: `10+`
+- When only total `calls` exists:
+  - `0.0`: `0`
+  - `1.0`: `1-2`
+  - `2.0`: `3-9`
+  - `3.0`: `10+`
+
+### Recency Adjustments
+
+- add `0.5` when `last_used_at <= 7 days`
+- add `0.25` when `last_used_at <= 30 days`
+- subtract `0.5` when `last_used_at > 180 days`
+- add `0.25` when `active_days >= 10`
+- add `0.10` when `active_days >= 3`
+
+### Evidence Weight
+
+- `1.00`: direct usage file
+- `0.45`: transcript-history fallback
+- `0.00`: missing usage evidence
+
+Clamp the final usage score to `0.0-3.0`.
 
 ## 2. Uniqueness Score (`0.0-3.0`)
 
@@ -59,7 +101,7 @@ Adjustments:
 - subtract `1.0` when `worse_rate > better_rate`
 - clamp the final impact score to `0.0-4.0`
 
-When ablation is missing, use a temporary neutral score of `2.0` and mark the report as incomplete.
+When ablation is missing, use a temporary neutral score of `2.0` and lower confidence.
 
 ### API and tool skills
 
@@ -74,29 +116,78 @@ Use protected-capability scoring instead:
 - subtract `0.5` when calls are `0`
 - clamp the final impact score to `0.0-4.0`
 
+## 4. Confidence Score (`0.0-1.0`)
+
+Confidence describes evidence quality, not usefulness.
+
+Add:
+
+- `0.35` for direct usage files
+- `0.15` for history fallback
+- `0.20` when recent usage fields exist
+- `0.10` when only total direct calls exist
+- `0.25` for protected `api/tool` classification
+- `0.25` for `general` skills with `>= 5` ablation cases
+- `0.15` for `general` skills with `1-4` ablation cases
+- `0.10` when overlap comparison has peers
+- `0.05` when only one skill exists in scope
+- `0.10` when community metadata exists
+
+Clamp the final confidence score to `0.0-1.0`.
+
+## 5. Community Prior Score (`0.0-1.0`)
+
+Treat community data as external prior, not a local verdict.
+
+Weighted components:
+
+- `0.35`: normalized rating
+- `0.25`: current installs or downloads
+- `0.20`: trending metric
+- `0.10`: stars
+- `0.10`: maintenance freshness from `last_updated`
+
+Use it to rank review priority and benchmark replacements.
+
+## 6. Risk Level
+
+Run static scans against `SKILL.md`, scripts, and reference files.
+
+Typical flags:
+
+- `curl-pipe-shell`
+- `dynamic-exec`
+- `secret-access`
+- `persistence-hook`
+- `external-post`
+- `shell-exec`
+- `network-download`
+- `base64-payload`
+
+Risk levels:
+
+- `none`: `0.0`
+- `low`: `0.0 < score < 2.0`
+- `medium`: `2.0-3.9`
+- `high`: `4.0+`
+
 ## Verdict Bands
 
 - `8.0-10.0`: keep
-- `6.0-7.9`: keep, optional narrowing
-- `4.5-5.9`: review, merge when overlap stays high
+- `6.0-7.9`: keep, narrow when overlap stays high
+- `4.5-5.9`: review
 - `3.0-4.4`: merge or delete candidate
 - `0.0-2.9`: strong delete candidate
 
-## Delete Recommendation Rules
+## Action Rules
 
-### General skills
+- `high risk`: `quarantine-review`
+- `medium risk + strong local score`: `keep-review-risk`
+- `low confidence + weak local score`: `observe-30d`
+- `low local score + high overlap`: `merge-delete`
+- `very low local score`: `delete`
+- `low local score + strong community prior`: `review-vs-community`
 
-Recommend deletion when either condition holds:
-
-- `total_score < 3.0`
-- `total_score < 4.5` and highest overlap `>= 0.65` and calls `<= 1`
-
-### API and tool skills
-
-Recommend deletion only when all conditions hold:
-
-- `total_score < 4.0`
-- calls `== 0`
-- highest overlap `>= 0.75`
-
-Prefer merge or scope narrowing over deletion when a low-scoring skill still exposes a distinct host integration.
+Community data shapes review order.
+Risk level shapes safety action.
+Local score stays the main usefulness judgment.
