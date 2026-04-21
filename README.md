@@ -1,110 +1,133 @@
 # skill-usefulness-audit
 
-手动触发的 skill 审计器。
-Manual-triggered skill auditor for installed agent skills.
+装的 skill 越多，清理就越容易靠感觉。
 
-它现在做六件事：
+`skill-usefulness-audit` 会把每个 skill 的近期使用、功能重叠、消融收益、社区信号和执行风险放到一张表里，给出 `keep / review / merge-delete / quarantine-review` 建议。
 
-1. 读取使用证据，并优先看近期调用
-2. 给不同证据来源加权，区分原生日志和历史提及
-3. 读取所有已安装 skill 说明，检查功能重叠
-4. 对非 API、非工具型 skill 读取历史消融结果
-5. 扫描风险与健康信号
-6. 读取可选的离线 community 指标
+`skill-usefulness-audit` audits installed skills with one goal: show which ones still earn their place. It combines local usage, overlap, ablation impact, offline community signals, and execution risk into one report.
 
-最终输出 10 分制本地评分、`confidence_score`、`community_prior_score`、`risk_level`、`action`，以及删除或合并建议。
+## 适合谁
 
-It now does six things:
+- 想清理挂载 skill，手里没有一份像样证据
+- 想知道哪些 skill 只是功能重复
+- 想把“本地常用”和“社区热门”分开看
+- 想给团队留一份可复盘的技能盘点结果
 
-1. Read usage evidence with recency fields
-2. Weight evidence sources differently for native logs and transcript fallback
-3. Read installed skill manifests and detect overlap
-4. Read history-based ablation results for non-API and non-tool skills
-5. Scan static risk and health signals
-6. Read optional offline community metrics
+## Who It Helps
 
-It outputs a 10-point local score plus `confidence_score`, `community_prior_score`, `risk_level`, `action`, and delete or merge recommendations.
+- Teams cleaning up crowded skill lists
+- Builders comparing overlapping skills
+- People who want local evidence and registry signals side by side
+- Anyone who wants an audit they can rerun and diff later
+
+## 30 秒跑起来
+
+```bash
+python codex-skill/scripts/skill_usefulness_audit.py audit \
+  --skills-root codex-skill \
+  --markdown-out test-output/report.md \
+  --json-out test-output/report.json
+```
+
+审计真实宿主里的技能时，直接把 `--skills-root` 指向你的 skill 目录。
+
+```bash
+python codex-skill/scripts/skill_usefulness_audit.py audit \
+  --skills-root ~/.codex/skills \
+  --markdown-out skill-audit-report.md \
+  --json-out skill-audit-report.json
+```
+
+When auditing a real host, point `--skills-root` at the installed skill directories and keep the same output flags.
+
+## 结果怎么看
+
+- `local_score`: 本地 10 分主分，核心看 usage / overlap / impact
+- `confidence_score`: 证据扎实程度
+- `community_prior_score`: 离线社区先验，独立输出
+- `risk_level`: 执行面风险，只看脚本和资源文件
+- `action`: 最后建议动作
+
+`history` 只是弱证据。原生日志最稳，历史对话只适合补位。
+
+## Reading The Report
+
+- `local_score`: main 10-point local score
+- `confidence_score`: how strong the evidence is
+- `community_prior_score`: optional offline registry signal
+- `risk_level`: execution-surface risk from scripts and runnable resources
+- `action`: keep, review, merge-delete, or quarantine-review
+
+Native usage logs are stronger than transcript mentions. History fallback is there for partial evidence, not for final truth.
+
+## 输入数据
+
+支持这些输入：
+
+- `usage`: JSON、JSONL、CSV、TSV，支持 `calls / recent_30d_calls / recent_90d_calls / last_used_at / active_days`
+- `history`: 纯文本、JSON、JSONL，对话正文会过滤宿主注入提示
+- `ablation`: JSON、JSONL，支持 `cases / results / items / data`
+- `community`: JSON、JSONL、CSV、TSV，适合离线导出的 registry 指标
+
+同名 skill 会优先按 `path / namespace / source` 解析。只给名字、又遇到重名时，这份证据会保守处理。
+
+## Input Formats
+
+Supported inputs:
+
+- `usage`: JSON, JSONL, CSV, TSV
+- `history`: plain text, JSON, JSONL
+- `ablation`: JSON, JSONL
+- `community`: JSON, JSONL, CSV, TSV
+
+Duplicate skill names resolve through `path`, `namespace`, and `source` before falling back to name-only matching.
+
+## 本地开发检查
+
+```bash
+python scripts/sync_bundle.py
+python -m unittest discover -s tests -v
+python codex-skill/scripts/skill_usefulness_audit.py audit \
+  --skills-root codex-skill \
+  --markdown-out test-output/report.md \
+  --json-out test-output/report.json
+```
+
+## Local Dev Check
+
+```bash
+python scripts/sync_bundle.py
+python -m unittest discover -s tests -v
+python codex-skill/scripts/skill_usefulness_audit.py audit \
+  --skills-root codex-skill \
+  --markdown-out test-output/report.md \
+  --json-out test-output/report.json
+```
 
 ## 目录
 
 - `codex-skill/`: 运行时 skill 源文件
 - `skill/`: ClawHub 发布包
-- `tests/`: 稳定性与兼容性测试
+- `tests/`: 兼容性和回归测试
 - `scripts/sync_bundle.py`: 从 `codex-skill/` 同步生成 `skill/`
 
 ## Layout
 
 - `codex-skill/`: runtime skill source
 - `skill/`: ClawHub publish bundle
-- `tests/`: stability and compatibility tests
+- `tests/`: regression and compatibility tests
 - `scripts/sync_bundle.py`: sync `codex-skill/` into `skill/`
-
-## 本地验证
-
-```bash
-python scripts/sync_bundle.py
-python -m unittest discover -s tests -v
-python codex-skill/scripts/skill_usefulness_audit.py audit \
-  --skills-root codex-skill \
-  --community-file test-output/community.json \
-  --markdown-out test-output/report.md \
-  --json-out test-output/report.json
-```
-
-## Local Validation
-
-```bash
-python scripts/sync_bundle.py
-python -m unittest discover -s tests -v
-python codex-skill/scripts/skill_usefulness_audit.py audit \
-  --skills-root codex-skill \
-  --community-file test-output/community.json \
-  --markdown-out test-output/report.md \
-  --json-out test-output/report.json
-```
-
-## 兼容性
-
-当前兼容这些输入形态：
-
-- `usage`: JSON、JSONL、CSV、TSV，支持 `calls / recent_30d_calls / recent_90d_calls / last_used_at / active_days` 及中英文字段别名
-- `history`: 纯文本、JSON、JSONL、嵌套 `content/parts/messages` 结构
-- `ablation`: 列表、`cases/results/items/data` 容器、英文与中文 verdict 字段
-- `community`: JSON、JSONL、CSV、TSV，本地离线 registry 指标
-
-## Compatibility
-
-Current compatibility surface:
-
-- `usage`: JSON, JSONL, CSV, TSV with `calls / recent_30d_calls / recent_90d_calls / last_used_at / active_days` and Chinese aliases
-- `history`: plain text, JSON, JSONL, nested `content/parts/messages` exports
-- `ablation`: list payloads, `cases/results/items/data` containers, English and Chinese verdict labels
-- `community`: JSON, JSONL, CSV, TSV offline registry metrics
 
 ## 发布
 
-先同步 bundle：
-
 ```bash
 python scripts/sync_bundle.py
-```
-
-发布到 ClawHub：
-
-```bash
-clawhub publish ./skill --slug skill-usefulness-audit --name "skill-usefulness-audit" --version 0.2.0 --tags latest,audit,skills --changelog "Recency-weighted evidence, confidence score, risk scan, and offline community metrics"
+clawhub publish ./skill --slug skill-usefulness-audit --name "skill-usefulness-audit" --version 0.2.1 --tags latest,audit,skills --changelog "Fix duplicate-name evidence routing, doc-only risk false positives, host-prompt history inflation, and README quickstart"
 ```
 
 ## Publish
 
-Sync the bundle first:
-
 ```bash
 python scripts/sync_bundle.py
-```
-
-Publish to ClawHub:
-
-```bash
-clawhub publish ./skill --slug skill-usefulness-audit --name "skill-usefulness-audit" --version 0.2.0 --tags latest,audit,skills --changelog "Recency-weighted evidence, confidence score, risk scan, and offline community metrics"
+clawhub publish ./skill --slug skill-usefulness-audit --name "skill-usefulness-audit" --version 0.2.1 --tags latest,audit,skills --changelog "Fix duplicate-name evidence routing, doc-only risk false positives, host-prompt history inflation, and README quickstart"
 ```

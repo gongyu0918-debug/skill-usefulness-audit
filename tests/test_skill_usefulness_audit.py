@@ -57,6 +57,16 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
                 return item
         raise AssertionError(f"missing result for {name}")
 
+    def results_named(self, payload: dict, name: str) -> list[dict]:
+        return [item for item in payload["results"] if item["name"] == name]
+
+    def result_for_path(self, payload: dict, path: Path) -> dict:
+        resolved = str(path.resolve())
+        for item in payload["results"]:
+            if item["path"] == resolved:
+                return item
+        raise AssertionError(f"missing result for {resolved}")
+
     def test_json_usage_and_ablation_drive_delete_candidate(self) -> None:
         skills_root = self.tempdir / "skills"
         write_skill(skills_root, "tone-polisher", "Rewrite text with polished tone and softer phrasing.")
@@ -186,6 +196,47 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
 
         self.assertIn("calls=2", result.stdout)
 
+    def test_history_fallback_ignores_host_prompt_skill_lists(self) -> None:
+        skills_root = self.tempdir / "skills"
+        write_skill(skills_root, "frontend-skill", "Build bold landing pages.")
+
+        history_path = self.tempdir / "history.jsonl"
+        history_path.write_text(
+            "\n".join(
+                [
+                    json.dumps(
+                        {
+                            "type": "response_item",
+                            "payload": {
+                                "type": "message",
+                                "role": "user",
+                                "content": [
+                                    {
+                                        "type": "input_text",
+                                        "text": "# AGENTS.md instructions\n### Available skills\n- frontend-skill: Use for landing pages.",
+                                    }
+                                ],
+                            },
+                        }
+                    ),
+                    json.dumps({"role": "user", "text": "请运行 $frontend-skill"}),
+                    json.dumps({"role": "assistant", "text": "frontend-skill 已执行"}),
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        payload = self.run_audit_json(
+            "--skills-root",
+            str(skills_root),
+            "--history-file",
+            str(history_path),
+        )
+
+        item = self.first_result(payload, "frontend-skill")
+        self.assertEqual(item["calls"], 2)
+        self.assertEqual(item["usage_source"], "history")
+
     def test_ablation_with_alias_fields_and_chinese_verdict_is_supported(self) -> None:
         skills_root = self.tempdir / "skills"
         write_skill(skills_root, "tone-polisher", "Rewrite text with polished tone and softer phrasing.")
@@ -307,6 +358,24 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
         self.assertIn("curl-pipe-shell", item["risk_flags"])
         self.assertIn("secret-access", item["risk_flags"])
 
+    def test_risk_scan_ignores_documentation_only_markers(self) -> None:
+        skills_root = self.tempdir / "skills"
+        write_skill(
+            skills_root,
+            "doc-heavy-skill",
+            "Explain deployment setup.",
+            extra_body="Mention `.env`, credentials, and POST requests in docs only.",
+        )
+
+        payload = self.run_audit_json(
+            "--skills-root",
+            str(skills_root),
+        )
+
+        item = self.first_result(payload, "doc-heavy-skill")
+        self.assertEqual(item["risk_level"], "none")
+        self.assertEqual(item["risk_flags"], [])
+
     def test_community_csv_is_supported(self) -> None:
         skills_root = self.tempdir / "skills"
         today = date.today().isoformat()
@@ -329,11 +398,49 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
         item = self.first_result(payload, "calendar-helper")
         self.assertGreater(item["community_prior_score"], 0.0)
 
+    def test_same_name_skills_are_resolved_by_path(self) -> None:
+        root_a = self.tempdir / "skills-a"
+        root_b = self.tempdir / "skills-b"
+        skill_a = write_skill(root_a, "frontend-skill", "Build bold landing pages with image-led hierarchy.")
+        skill_b = write_skill(root_b, "frontend-skill", "Build bold landing pages with image-led hierarchy.")
+
+        usage_path = self.tempdir / "usage.json"
+        usage_path.write_text(
+            json.dumps(
+                [
+                    {"path": str(skill_a), "calls": 4, "recent_30d_calls": 2},
+                    {"path": str(skill_b), "calls": 1, "recent_30d_calls": 1},
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        payload = self.run_audit_json(
+            "--skills-root",
+            str(root_a),
+            "--skills-root",
+            str(root_b),
+            "--usage-file",
+            str(usage_path),
+        )
+
+        rows = self.results_named(payload, "frontend-skill")
+        self.assertEqual(len(rows), 2)
+
+        first = self.result_for_path(payload, skill_a)
+        second = self.result_for_path(payload, skill_b)
+        self.assertEqual(first["calls"], 4)
+        self.assertEqual(second["calls"], 1)
+        self.assertEqual(first["display_name"], "frontend-skill@skills-a")
+        self.assertEqual(second["display_name"], "frontend-skill@skills-b")
+        self.assertEqual(first["overlap_peer"], "frontend-skill@skills-b")
+        self.assertEqual(second["overlap_peer"], "frontend-skill@skills-a")
+
     def test_sync_bundle_writes_publish_manifest(self) -> None:
         subprocess.run(["python", str(SYNC_SCRIPT)], cwd=REPO_ROOT, check=True, text=True, capture_output=True)
         bundle_skill = (REPO_ROOT / "skill" / "SKILL.md").read_text(encoding="utf-8")
         self.assertIn("slug: skill-usefulness-audit", bundle_skill)
-        self.assertIn("version: 0.2.0", bundle_skill)
+        self.assertIn("version: 0.2.1", bundle_skill)
         self.assertIn("审计已安装 skill 是否还有真实价值", bundle_skill)
         self.assertFalse((REPO_ROOT / "skill" / "scripts" / "__pycache__").exists())
 

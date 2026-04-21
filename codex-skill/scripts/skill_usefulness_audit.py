@@ -12,6 +12,7 @@ import math
 import os
 import re
 import sys
+from collections import Counter
 from datetime import date, datetime, timezone
 from pathlib import Path
 
@@ -97,15 +98,56 @@ TOOL_KEYWORDS = {
 NAME_KEYS = (
     "skill",
     "name",
-    "id",
-    "slug",
-    "identifier",
     "skill_name",
-    "skill_id",
-    "skillid",
     "技能",
     "技能名",
     "技能名称",
+)
+
+IDENTIFIER_KEYS = (
+    "id",
+    "identifier",
+    "skill_id",
+    "skillid",
+    "技能id",
+    "技能标识",
+)
+
+SLUG_KEYS = (
+    "slug",
+    "skill_slug",
+    "技能slug",
+    "技能短名",
+)
+
+PATH_KEYS = (
+    "path",
+    "skill_path",
+    "skill_root",
+    "root",
+    "directory",
+    "dir",
+    "location",
+    "路径",
+    "目录",
+    "技能路径",
+)
+
+SOURCE_KEYS = (
+    "source",
+    "origin",
+    "来源",
+)
+
+NAMESPACE_KEYS = (
+    "namespace",
+    "plugin",
+    "plugin_name",
+    "package",
+    "namespace_name",
+    "命名空间",
+    "插件",
+    "插件名",
 )
 
 COUNT_KEYS = (
@@ -303,8 +345,49 @@ TEXT_FILE_SUFFIXES = {
     ".txt",
 }
 
+RISK_SCAN_SUFFIXES = {
+    "",
+    ".cfg",
+    ".ini",
+    ".js",
+    ".jsx",
+    ".ps1",
+    ".py",
+    ".sh",
+    ".toml",
+    ".ts",
+    ".tsx",
+    ".yaml",
+    ".yml",
+}
+
+RISK_SCAN_DIRS = {"scripts", "resources", "bin", "hooks"}
+
 MAX_SCAN_BYTES = 512 * 1024
 HISTORY_EVIDENCE_WEIGHT = 0.45
+ALLOWED_HISTORY_ROLES = {"user", "assistant"}
+HISTORY_SKIP_FIELDS = {
+    "developer-instructions",
+    "developer-prompt",
+    "environment-context",
+    "sandbox-policy",
+    "skills",
+    "tool-definitions",
+    "tools",
+    "turn-context",
+    "user-instructions",
+}
+HOST_PROMPT_MARKERS = (
+    "# agents.md instructions",
+    "### available skills",
+    "### how to use skills",
+    "<app-context>",
+    "<environment_context>",
+    "<instructions>",
+    "\"type\":\"turn_context\"",
+    "developer_instructions",
+    "user_instructions",
+)
 
 RISK_RULES = (
     {
@@ -398,6 +481,16 @@ def normalize_name(value: str) -> str:
     return value.strip("-")
 
 
+def normalize_pathish(value) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    resolved = Path(text).expanduser().resolve()
+    return resolved.as_posix().lower()
+
+
 def read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="replace")
 
@@ -448,6 +541,18 @@ def guess_source(path: Path) -> str:
         return "plugin"
     if "/skills/" in joined:
         return "user"
+    return "other"
+
+
+def guess_namespace(path: Path) -> str:
+    lowered = [part.lower() for part in path.parts]
+    if "plugins" in lowered and "cache" in lowered:
+        cache_index = lowered.index("cache")
+        if cache_index + 2 < len(path.parts):
+            return normalize_name(path.parts[cache_index + 2])
+    source = guess_source(path)
+    if source in {"system", "user"}:
+        return source
     return "other"
 
 
@@ -560,6 +665,92 @@ def first_present(mapping: dict, keys: tuple[str, ...] | list[str]) -> object | 
     return None
 
 
+def extract_record_identity(mapping: dict, hint_name: str | None = None) -> dict[str, str]:
+    explicit_name = normalize_name(str(first_present(mapping, NAME_KEYS) or ""))
+    slug = normalize_name(str(first_present(mapping, SLUG_KEYS) or ""))
+    identifier = normalize_name(str(first_present(mapping, IDENTIFIER_KEYS) or ""))
+    source = normalize_name(str(first_present(mapping, SOURCE_KEYS) or ""))
+    namespace = normalize_name(str(first_present(mapping, NAMESPACE_KEYS) or ""))
+    path = normalize_pathish(first_present(mapping, PATH_KEYS)) or ""
+    name = explicit_name or slug or identifier or normalize_name(str(hint_name or ""))
+    return {
+        "name": name,
+        "slug": slug,
+        "identifier": identifier,
+        "source": source,
+        "namespace": namespace,
+        "path": path,
+    }
+
+
+def record_lookup_key(identity: dict[str, str]) -> str | None:
+    if identity["path"]:
+        return f"path:{identity['path']}"
+    if identity["namespace"] and identity["slug"]:
+        return f"namespace:{identity['namespace']}:{identity['slug']}"
+    if identity["namespace"] and identity["name"]:
+        return f"namespace:{identity['namespace']}:{identity['name']}"
+    if identity["source"] and identity["slug"]:
+        return f"source:{identity['source']}:{identity['slug']}"
+    if identity["source"] and identity["name"]:
+        return f"source:{identity['source']}:{identity['name']}"
+    if identity["slug"]:
+        return f"slug:{identity['slug']}"
+    if identity["identifier"]:
+        return f"id:{identity['identifier']}"
+    if identity["name"]:
+        return f"name:{identity['name']}"
+    return None
+
+
+def skill_lookup_keys(skill: dict[str, object]) -> list[str]:
+    keys = [f"path:{normalize_pathish(skill['path'])}"]
+    namespace = str(skill.get("namespace") or "")
+    source = str(skill.get("source") or "")
+    slug = str(skill.get("slug") or "")
+    name = str(skill.get("name") or "")
+    if namespace and slug:
+        keys.append(f"namespace:{namespace}:{slug}")
+    if namespace and name:
+        keys.append(f"namespace:{namespace}:{name}")
+    if source and slug:
+        keys.append(f"source:{source}:{slug}")
+    if source and name:
+        keys.append(f"source:{source}:{name}")
+    if slug:
+        keys.append(f"slug:{slug}")
+    if name:
+        keys.append(f"name:{name}")
+    return [key for key in keys if key]
+
+
+def resolve_record(
+    store: dict[str, dict[str, object]],
+    skill: dict[str, object],
+    alias_counts: Counter[str],
+) -> dict[str, object] | None:
+    for key in skill_lookup_keys(skill):
+        if alias_counts.get(key, 0) > 1:
+            continue
+        record = store.get(key)
+        if record is not None:
+            return record
+    return None
+
+
+def skill_display_name(skill: dict[str, object], alias_counts: Counter[str]) -> str:
+    name = str(skill["name"])
+    if alias_counts.get(f"name:{name}", 0) <= 1:
+        return name
+    namespace = str(skill.get("namespace") or "")
+    if namespace and namespace not in {"system", "user", "other"}:
+        return f"{name}@{namespace}"
+    parent_hint = normalize_name(Path(str(skill["path"])).parent.name)
+    if parent_hint and parent_hint not in {"skills", ".system"}:
+        return f"{name}@{parent_hint}"
+    return f"{name}@{skill['source']}"
+
+
 def normalize_verdict(value) -> str:
     if value is None:
         return ""
@@ -567,18 +758,47 @@ def normalize_verdict(value) -> str:
     return VERDICT_ALIASES.get(lowered, lowered)
 
 
-def collect_strings(node) -> list[str]:
-    values: list[str] = []
+def looks_like_host_prompt(text: str) -> bool:
+    lowered = text.lower()
+    return any(marker in lowered for marker in HOST_PROMPT_MARKERS)
+
+
+def sanitize_history_text(text: str) -> str:
+    lines = [line for line in text.splitlines() if not looks_like_host_prompt(line)]
+    return "\n".join(lines)
+
+
+def extract_history_strings(node, inherited_role: str | None = None) -> list[str]:
     if isinstance(node, str):
-        return [node]
+        if inherited_role in ALLOWED_HISTORY_ROLES and not looks_like_host_prompt(node):
+            return [node]
+        return []
+
     if isinstance(node, list):
+        values: list[str] = []
         for item in node:
-            values.extend(collect_strings(item))
+            values.extend(extract_history_strings(item, inherited_role))
         return values
+
     if isinstance(node, dict):
-        for value in node.values():
-            values.extend(collect_strings(value))
-    return values
+        node_type = normalize_name(str(node.get("type") or ""))
+        if node_type == "turn-context":
+            return []
+
+        role = str(node.get("role") or inherited_role or "").lower()
+        if role in {"developer", "system", "tool"}:
+            return []
+
+        values: list[str] = []
+        next_role = role if role in ALLOWED_HISTORY_ROLES else inherited_role
+        for key, value in node.items():
+            key_norm = normalize_name(str(key))
+            if key_norm in HISTORY_SKIP_FIELDS or key_norm == "role":
+                continue
+            values.extend(extract_history_strings(value, next_role))
+        return values
+
+    return []
 
 
 def empty_usage_record() -> dict[str, object]:
@@ -625,9 +845,9 @@ def merge_dates(existing: str | None, incoming: str | None, pick: str) -> str | 
 
 
 def usage_record_from_mapping(mapping: dict, hint_name: str | None = None) -> tuple[str, dict[str, object]] | None:
-    raw_name = first_present(mapping, NAME_KEYS) or hint_name
-    name = normalize_name(str(raw_name or ""))
-    if not name:
+    identity = extract_record_identity(mapping, hint_name=hint_name)
+    lookup_key = record_lookup_key(identity)
+    if not lookup_key:
         return None
 
     calls = coerce_int(first_present(mapping, COUNT_KEYS))
@@ -650,7 +870,7 @@ def usage_record_from_mapping(mapping: dict, hint_name: str | None = None) -> tu
         return None
 
     return (
-        name,
+        lookup_key,
         {
             "calls": max(0, calls or 0),
             "recent_30d_calls": recent_30d_calls,
@@ -721,7 +941,10 @@ def consume_usage_node(
             scalar_items.append((key_text, count))
         if scalar_items:
             for key_text, count in scalar_items:
-                merge_usage_record(usage, normalize_name(key_text), {"calls": count})
+                identity = {"name": normalize_name(key_text), "slug": "", "identifier": "", "source": "", "namespace": "", "path": ""}
+                lookup_key = record_lookup_key(identity)
+                if lookup_key:
+                    merge_usage_record(usage, lookup_key, {"calls": count})
             return
 
         for key, value in node.items():
@@ -744,7 +967,10 @@ def consume_usage_node(
         count = coerce_int(node)
         if count is None:
             return
-        merge_usage_record(usage, normalize_name(hint_name), {"calls": count})
+        identity = {"name": normalize_name(hint_name), "slug": "", "identifier": "", "source": "", "namespace": "", "path": ""}
+        lookup_key = record_lookup_key(identity)
+        if lookup_key:
+            merge_usage_record(usage, lookup_key, {"calls": count})
 
 
 def load_usage_csv(path: Path) -> dict[str, dict[str, object]]:
@@ -783,9 +1009,9 @@ def load_usage(paths: list[Path]) -> dict[str, dict[str, object]]:
 
 
 def infer_usage_from_history(paths: list[Path], skill_names: list[str]) -> dict[str, dict[str, object]]:
-    usage = {name: {"calls": 0} for name in skill_names}
+    usage = {f"name:{name}": {"calls": 0} for name in skill_names}
     patterns = {
-        name: re.compile(rf"(?<![a-z0-9])\$?{re.escape(name)}(?![a-z0-9])", re.IGNORECASE)
+        f"name:{name}": re.compile(rf"(?<![a-z0-9])\$?{re.escape(name)}(?![a-z0-9])", re.IGNORECASE)
         for name in skill_names
     }
     for path in paths:
@@ -794,11 +1020,11 @@ def infer_usage_from_history(paths: list[Path], skill_names: list[str]) -> dict[
         if path.suffix.lower() in {".json", ".jsonl"}:
             try:
                 payload = load_json_or_jsonl(path)
-                text = "\n".join(collect_strings(payload)).lower()
+                text = "\n".join(extract_history_strings(payload)).lower()
             except json.JSONDecodeError:
-                text = read_text(path).lower()
+                text = sanitize_history_text(read_text(path)).lower()
         else:
-            text = read_text(path).lower()
+            text = sanitize_history_text(read_text(path)).lower()
         for name, pattern in patterns.items():
             usage[name]["calls"] = int(usage[name]["calls"]) + len(pattern.findall(text))
     return usage
@@ -856,10 +1082,11 @@ def load_ablation(paths: list[Path]) -> dict[str, dict[str, float]]:
         for item in items:
             if not isinstance(item, dict):
                 continue
-            name = normalize_name(str(first_present(item, NAME_KEYS) or ""))
-            if not name:
+            identity = extract_record_identity(item)
+            lookup_key = record_lookup_key(identity)
+            if not lookup_key:
                 continue
-            by_skill.setdefault(name, []).append(item)
+            by_skill.setdefault(lookup_key, []).append(item)
 
     summary: dict[str, dict[str, float]] = {}
     for name, items in by_skill.items():
@@ -948,9 +1175,9 @@ def normalize_rating(value) -> float | None:
 
 
 def community_record_from_mapping(mapping: dict, hint_name: str | None = None) -> tuple[str, dict[str, object]] | None:
-    raw_name = first_present(mapping, NAME_KEYS) or hint_name
-    name = normalize_name(str(raw_name or ""))
-    if not name:
+    identity = extract_record_identity(mapping, hint_name=hint_name)
+    lookup_key = record_lookup_key(identity)
+    if not lookup_key:
         return None
 
     record = {
@@ -965,7 +1192,7 @@ def community_record_from_mapping(mapping: dict, hint_name: str | None = None) -
     }
     if not any(value is not None for value in record.values()):
         return None
-    return name, record
+    return lookup_key, record
 
 
 def merge_community_record(store: dict[str, dict[str, object]], name: str, incoming: dict[str, object]) -> None:
@@ -1088,7 +1315,15 @@ def scan_risk(root: Path) -> dict[str, object]:
             continue
         if "__pycache__" in path.parts:
             continue
-        if path.name != "SKILL.md" and path.suffix.lower() not in TEXT_FILE_SUFFIXES:
+        relative_path = path.relative_to(root)
+        relative_parts = {part.lower() for part in relative_path.parts}
+        if "references" in relative_parts:
+            continue
+        if path.name == "SKILL.md":
+            continue
+        if path.suffix.lower() not in RISK_SCAN_SUFFIXES:
+            continue
+        if relative_path.parent != Path(".") and not any(part.lower() in RISK_SCAN_DIRS for part in relative_path.parts[:-1]):
             continue
         try:
             if path.stat().st_size > MAX_SCAN_BYTES:
@@ -1096,7 +1331,7 @@ def scan_risk(root: Path) -> dict[str, object]:
         except OSError:
             continue
         text = read_text(path).lower()
-        relative = str(path.relative_to(root))
+        relative = str(relative_path)
         for rule in RISK_RULES:
             if any(re.search(pattern, text, flags=re.IGNORECASE | re.MULTILINE) for pattern in rule["patterns"]):
                 hit = hits.setdefault(
@@ -1134,6 +1369,7 @@ def scan_skill(skill_md: Path) -> dict[str, object]:
     text = read_text(skill_md)
     frontmatter, body = parse_frontmatter(text)
     name = normalize_name(frontmatter.get("name", root.name) or root.name)
+    slug = normalize_name(frontmatter.get("slug", ""))
     description = frontmatter.get("description", "")
     headings = [line.lstrip("# ").strip() for line in body.splitlines() if line.startswith("#")]
     scripts_dir = root / "scripts"
@@ -1146,8 +1382,10 @@ def scan_skill(skill_md: Path) -> dict[str, object]:
     risk = scan_risk(root)
     return {
         "name": name,
+        "slug": slug,
         "path": str(root),
         "source": guess_source(root),
+        "namespace": guess_namespace(root),
         "description": description,
         "headings": headings,
         "scripts_count": len(script_files),
@@ -1490,6 +1728,7 @@ def run_audit(args: argparse.Namespace) -> int:
 
     skills = [scan_skill(path) for path in skill_files]
     names = [skill["name"] for skill in skills]
+    alias_counts = Counter(key for skill in skills for key in skill_lookup_keys(skill))
     usage_paths = [Path(item).expanduser().resolve() for item in (args.usage_file or [])]
     history_paths = [Path(item).expanduser().resolve() for item in (args.history_file or [])]
     ablation_paths = [Path(item).expanduser().resolve() for item in (args.ablation_file or [])]
@@ -1506,23 +1745,23 @@ def run_audit(args: argparse.Namespace) -> int:
         best_peer = None
         best_overlap = 0.0
         for other in skills:
-            if skill["name"] == other["name"]:
+            if skill["path"] == other["path"]:
                 continue
             overlap = jaccard(skill["tokens"], other["tokens"])
             if overlap > best_overlap:
                 best_overlap = overlap
-                best_peer = str(other["name"])
+                best_peer = skill_display_name(other, alias_counts)
 
-        usage_record = usage.get(str(skill["name"]))
+        usage_record = resolve_record(usage, skill, alias_counts)
         usage_source = "usage"
         if usage_record is None:
-            usage_record = history_usage.get(str(skill["name"]), {"calls": 0})
+            usage_record = resolve_record(history_usage, skill, alias_counts) or {"calls": 0}
             usage_source = "history" if history_paths else "missing"
 
         evidence_weight = usage_evidence_weight(usage_source)
         calls = int(usage_record.get("calls", 0) or 0)
-        ablation_summary = ablation.get(str(skill["name"]))
-        community_entry = community.get(str(skill["name"]))
+        ablation_summary = resolve_record(ablation, skill, alias_counts)
+        community_entry = resolve_record(community, skill, alias_counts)
         community_prior, community_conf = community_prior_score(community_entry)
 
         u_score = usage_score(usage_record, evidence_weight)
@@ -1551,7 +1790,10 @@ def run_audit(args: argparse.Namespace) -> int:
         results.append(
             {
                 "name": skill["name"],
+                "display_name": skill_display_name(skill, alias_counts),
                 "source": skill["source"],
+                "namespace": skill["namespace"],
+                "slug": skill["slug"],
                 "kind": kind,
                 "path": skill["path"],
                 "calls": calls,
@@ -1599,14 +1841,14 @@ def run_audit(args: argparse.Namespace) -> int:
             }
         )
 
-    ranked = sorted(results, key=lambda item: (-float(item["local_score"]), str(item["name"])))
+    ranked = sorted(results, key=lambda item: (-float(item["local_score"]), str(item["display_name"])))
     recommended_actions = sorted(
         [item for item in ranked if str(item["action"]) not in {"keep", "keep-narrow", "keep-system"}],
-        key=lambda item: (str(item["action"]), float(item["local_score"]), str(item["name"])),
+        key=lambda item: (str(item["action"]), float(item["local_score"]), str(item["display_name"])),
     )
     delete_candidates = sorted(
         [item for item in ranked if item["delete_candidate"]],
-        key=lambda item: (float(item["local_score"]), str(item["name"])),
+        key=lambda item: (float(item["local_score"]), str(item["display_name"])),
     )
     missing = [item for item in ranked if item["missing_usage"] or item["missing_ablation"] or item["missing_community"]]
 
@@ -1615,7 +1857,7 @@ def run_audit(args: argparse.Namespace) -> int:
         score_rows.append(
             [
                 str(index),
-                str(item["name"]),
+                str(item["display_name"]),
                 str(item["source"]),
                 str(item["kind"]),
                 str(item["calls"]),
@@ -1672,7 +1914,7 @@ def run_audit(args: argparse.Namespace) -> int:
     if recommended_actions:
         action_rows = [
             [
-                str(item["name"]),
+                str(item["display_name"]),
                 f"{item['local_score']:.1f}",
                 fmt_optional_float(item["confidence_score"]),
                 str(item["risk_level"]),
@@ -1693,7 +1935,7 @@ def run_audit(args: argparse.Namespace) -> int:
     if delete_candidates:
         delete_rows = [
             [
-                str(item["name"]),
+                str(item["display_name"]),
                 f"{item['local_score']:.1f}",
                 str(item["kind"]),
                 str(item["action"]),
@@ -1721,7 +1963,7 @@ def run_audit(args: argparse.Namespace) -> int:
                 gaps.append("ablation")
             if item["missing_community"]:
                 gaps.append("community")
-            missing_rows.append([str(item["name"]), str(item["kind"]), ", ".join(gaps)])
+            missing_rows.append([str(item["display_name"]), str(item["kind"]), ", ".join(gaps)])
         report_parts.extend(
             [
                 "",
