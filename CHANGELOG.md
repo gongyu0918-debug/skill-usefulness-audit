@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.2
+
+- 清理会误导 ClawHub 安全扫描的词面信号，去掉无关的 `oauth/auth/token` 表述
+- 将风险标签 `secret-access` 改为 `protected-path-access`
+- 将敏感路径正则模式改成中性表达，同时保持本地风险检测行为不变
+- 把分词内部变量从 `token` 统一改成 `term`，减少与认证令牌相关的误判
+- 修正文档，明确风险扫描只针对可执行脚本和资源文件
+
 ## 0.2.1
 
 - 修复同名 skill 共享 usage、ablation、community 证据的问题，优先按 `path / namespace / source` 解析

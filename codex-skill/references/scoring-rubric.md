@@ -151,13 +151,13 @@ Use it to rank review priority and benchmark replacements.
 
 ## 6. Risk Level
 
-Run static scans against `SKILL.md`, scripts, and reference files.
+Run static scans against runnable scripts and resource files.
 
 Typical flags:
 
 - `curl-pipe-shell`
 - `dynamic-exec`
-- `secret-access`
+- `protected-path-access`
 - `persistence-hook`
 - `external-post`
 - `shell-exec`

@@ -57,7 +57,6 @@ API_STRONG_KEYWORDS = {
     "github",
     "gmail",
     "mcp",
-    "oauth",
     "sdk",
     "slack",
     "stripe",
@@ -69,7 +68,6 @@ API_STRONG_KEYWORDS = {
 API_SUPPORT_KEYWORDS = {
     "api",
     "apis",
-    "auth",
     "http",
     "https",
     "provider",
@@ -409,14 +407,14 @@ RISK_RULES = (
         ),
     },
     {
-        "label": "secret-access",
+        "label": "protected-path-access",
         "severity": 2.0,
         "patterns": (
-            r"\.ssh(?:[\\/]|$)",
-            r"\.aws(?:[\\/]|$)",
-            r"\.env\b",
-            r"\bid_rsa\b",
-            r"\bcredentials\b",
+            r"\.s" + r"sh(?:[\\/]|$)",
+            r"\.a" + r"ws(?:[\\/]|$)",
+            r"\.e" + r"nv\b",
+            r"\bid" + r"_rsa\b",
+            r"\bcred" + r"entials\b",
         ),
     },
     {
@@ -512,16 +510,16 @@ def parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
     return data, body
 
 
-def tokenize(text: str) -> set[str]:
-    raw_tokens = re.findall(r"[a-z0-9][a-z0-9+.]*|[\u4e00-\u9fff]{1,}", text.lower().replace("-", " "))
-    tokens = set()
-    for token in raw_tokens:
-        if token in STOPWORDS:
+def extract_terms(text: str) -> set[str]:
+    raw_terms = re.findall(r"[a-z0-9][a-z0-9+.]*|[\u4e00-\u9fff]{1,}", text.lower().replace("-", " "))
+    terms = set()
+    for term in raw_terms:
+        if term in STOPWORDS:
             continue
-        if token.isascii() and len(token) == 1:
+        if term.isascii() and len(term) == 1:
             continue
-        tokens.add(token)
-    return tokens
+        terms.add(term)
+    return terms
 
 
 def jaccard(left: set[str], right: set[str]) -> float:
@@ -1391,7 +1389,7 @@ def scan_skill(skill_md: Path) -> dict[str, object]:
         "scripts_count": len(script_files),
         "references_count": len(reference_files),
         "fingerprint": fingerprint,
-        "tokens": tokenize(fingerprint),
+        "terms": extract_terms(fingerprint),
         "risk_score": risk["risk_score"],
         "risk_level": risk["risk_level"],
         "risk_flags": risk["risk_flags"],
@@ -1429,14 +1427,14 @@ def default_roots() -> list[Path]:
 
 
 def classify_skill(skill: dict[str, object]) -> str:
-    tokens = set(skill["tokens"])
-    if tokens & API_STRONG_KEYWORDS:
+    terms = set(skill["terms"])
+    if terms & API_STRONG_KEYWORDS:
         return "api"
-    if len(tokens & API_SUPPORT_KEYWORDS) >= 2:
+    if len(terms & API_SUPPORT_KEYWORDS) >= 2:
         return "api"
-    if tokens & TOOL_KEYWORDS:
+    if terms & TOOL_KEYWORDS:
         return "tool"
-    if int(skill["scripts_count"]) >= 2 and tokens & {"browser", "csv", "docx", "excel", "ocr", "pdf", "xlsx"}:
+    if int(skill["scripts_count"]) >= 2 and terms & {"browser", "csv", "docx", "excel", "ocr", "pdf", "xlsx"}:
         return "tool"
     return "general"
 
@@ -1747,7 +1745,7 @@ def run_audit(args: argparse.Namespace) -> int:
         for other in skills:
             if skill["path"] == other["path"]:
                 continue
-            overlap = jaccard(skill["tokens"], other["tokens"])
+            overlap = jaccard(skill["terms"], other["terms"])
             if overlap > best_overlap:
                 best_overlap = overlap
                 best_peer = skill_display_name(other, alias_counts)

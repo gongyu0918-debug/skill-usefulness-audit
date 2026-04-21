@@ -356,7 +356,7 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
         self.assertEqual(item["risk_level"], "high")
         self.assertEqual(item["action"], "quarantine-review")
         self.assertIn("curl-pipe-shell", item["risk_flags"])
-        self.assertIn("secret-access", item["risk_flags"])
+        self.assertIn("protected-path-access", item["risk_flags"])
 
     def test_risk_scan_ignores_documentation_only_markers(self) -> None:
         skills_root = self.tempdir / "skills"
@@ -440,7 +440,7 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
         subprocess.run(["python", str(SYNC_SCRIPT)], cwd=REPO_ROOT, check=True, text=True, capture_output=True)
         bundle_skill = (REPO_ROOT / "skill" / "SKILL.md").read_text(encoding="utf-8")
         self.assertIn("slug: skill-usefulness-audit", bundle_skill)
-        self.assertIn("version: 0.2.1", bundle_skill)
+        self.assertIn("version: 0.2.2", bundle_skill)
         self.assertIn("审计已安装 skill 是否还有真实价值", bundle_skill)
         self.assertFalse((REPO_ROOT / "skill" / "scripts" / "__pycache__").exists())
 

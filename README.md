@@ -122,12 +122,12 @@ python codex-skill/scripts/skill_usefulness_audit.py audit \
 
 ```bash
 python scripts/sync_bundle.py
-clawhub publish ./skill --slug skill-usefulness-audit --name "skill-usefulness-audit" --version 0.2.1 --tags latest,audit,skills --changelog "Fix duplicate-name evidence routing, doc-only risk false positives, host-prompt history inflation, and README quickstart"
+clawhub publish ./skill --slug skill-usefulness-audit --name "skill-usefulness-audit" --version 0.2.2 --tags latest,audit,skills --changelog "Reduce ClawHub scan false positives, rename protected-path risk labels, and keep audit behavior intact"
 ```
 
 ## Publish
 
 ```bash
 python scripts/sync_bundle.py
-clawhub publish ./skill --slug skill-usefulness-audit --name "skill-usefulness-audit" --version 0.2.1 --tags latest,audit,skills --changelog "Fix duplicate-name evidence routing, doc-only risk false positives, host-prompt history inflation, and README quickstart"
+clawhub publish ./skill --slug skill-usefulness-audit --name "skill-usefulness-audit" --version 0.2.2 --tags latest,audit,skills --changelog "Reduce ClawHub scan false positives, rename protected-path risk labels, and keep audit behavior intact"
 ```

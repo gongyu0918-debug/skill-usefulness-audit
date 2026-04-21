@@ -68,7 +68,7 @@ Examples: Excel, DOCX, PDF, browser automation, deployment, OCR, external API wr
    Use fresh runs or isolated threads when the host supports them.
    Replay representative historical prompts with the target skill enabled and disabled.
 7. Scan risk and health signals.
-   Record risky shell, network, secret, persistence, or dynamic-exec patterns.
+   Record risky shell, network, protected-path, persistence, or dynamic-exec patterns.
 8. Load optional community metrics.
    Accept local registry exports through `--community-file`.
    Treat these metrics as external prior, not local proof.
