@@ -410,11 +410,11 @@ RISK_RULES = (
         "label": "protected-path-access",
         "severity": 2.0,
         "patterns": (
-            r"\.s" + r"sh(?:[\\/]|$)",
-            r"\.a" + r"ws(?:[\\/]|$)",
-            r"\.e" + r"nv\b",
-            r"\bid" + r"_rsa\b",
-            r"\bcred" + r"entials\b",
+            r"\.ssh(?:[\\/]|$)",
+            r"\.aws(?:[\\/]|$)",
+            r"\.env\b",
+            r"\bid_rsa\b",
+            r"\bcredentials\b",
         ),
     },
     {
@@ -467,6 +467,18 @@ RISK_RULES = (
     },
 )
 
+COMPILED_RISK_RULES = tuple(
+    {
+        "label": str(rule["label"]),
+        "severity": float(rule["severity"]),
+        "patterns": tuple(re.compile(pattern, re.MULTILINE) for pattern in rule["patterns"]),
+    }
+    for rule in RISK_RULES
+)
+
+SELF_AUDIT_SLUG = "skill-usefulness-audit"
+SELF_AUDIT_SCRIPT = "scripts/skill_usefulness_audit.py"
+
 
 def clamp(value: float, low: float, high: float) -> float:
     return max(low, min(high, value))
@@ -486,7 +498,8 @@ def normalize_pathish(value) -> str | None:
     if not text:
         return None
     resolved = Path(text).expanduser().resolve()
-    return resolved.as_posix().lower()
+    normalized = os.path.normcase(os.path.normpath(str(resolved)))
+    return normalized.replace("\\", "/")
 
 
 def read_text(path: Path) -> str:
@@ -494,6 +507,7 @@ def read_text(path: Path) -> str:
 
 
 def parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
+    """Parse flat scalar frontmatter fields used by this skill bundle."""
     if not text.startswith("---"):
         return {}, text
     parts = text.split("---", 2)
@@ -653,8 +667,17 @@ def coerce_bool(value) -> bool | None:
     return None
 
 
-def first_present(mapping: dict, keys: tuple[str, ...] | list[str]) -> object | None:
-    lowered = {str(key).lower(): value for key, value in mapping.items()}
+def lowered_mapping(mapping: dict) -> dict[str, object]:
+    return {str(key).lower(): value for key, value in mapping.items()}
+
+
+def first_present(
+    mapping: dict,
+    keys: tuple[str, ...] | list[str],
+    lowered: dict[str, object] | None = None,
+) -> object | None:
+    if lowered is None:
+        lowered = lowered_mapping(mapping)
     for key in keys:
         if key in mapping:
             return mapping[key]
@@ -664,12 +687,13 @@ def first_present(mapping: dict, keys: tuple[str, ...] | list[str]) -> object | 
 
 
 def extract_record_identity(mapping: dict, hint_name: str | None = None) -> dict[str, str]:
-    explicit_name = normalize_name(str(first_present(mapping, NAME_KEYS) or ""))
-    slug = normalize_name(str(first_present(mapping, SLUG_KEYS) or ""))
-    identifier = normalize_name(str(first_present(mapping, IDENTIFIER_KEYS) or ""))
-    source = normalize_name(str(first_present(mapping, SOURCE_KEYS) or ""))
-    namespace = normalize_name(str(first_present(mapping, NAMESPACE_KEYS) or ""))
-    path = normalize_pathish(first_present(mapping, PATH_KEYS)) or ""
+    lowered = lowered_mapping(mapping)
+    explicit_name = normalize_name(str(first_present(mapping, NAME_KEYS, lowered) or ""))
+    slug = normalize_name(str(first_present(mapping, SLUG_KEYS, lowered) or ""))
+    identifier = normalize_name(str(first_present(mapping, IDENTIFIER_KEYS, lowered) or ""))
+    source = normalize_name(str(first_present(mapping, SOURCE_KEYS, lowered) or ""))
+    namespace = normalize_name(str(first_present(mapping, NAMESPACE_KEYS, lowered) or ""))
+    path = normalize_pathish(first_present(mapping, PATH_KEYS, lowered)) or ""
     name = explicit_name or slug or identifier or normalize_name(str(hint_name or ""))
     return {
         "name": name,
@@ -726,14 +750,20 @@ def resolve_record(
     store: dict[str, dict[str, object]],
     skill: dict[str, object],
     alias_counts: Counter[str],
-) -> dict[str, object] | None:
+) -> tuple[dict[str, object] | None, str | None]:
+    collision_scopes: list[str] = []
     for key in skill_lookup_keys(skill):
         if alias_counts.get(key, 0) > 1:
+            if key in store:
+                collision_scopes.append(key.split(":", 1)[0])
             continue
         record = store.get(key)
         if record is not None:
-            return record
-    return None
+            return record, None
+    if collision_scopes:
+        ordered_scopes = ", ".join(sorted(set(collision_scopes)))
+        return None, f"ambiguous {ordered_scopes} evidence; provide path, namespace, or source"
+    return None, None
 
 
 def skill_display_name(skill: dict[str, object], alias_counts: Counter[str]) -> str:
@@ -826,6 +856,14 @@ def max_optional(left: int | None, right: int | None) -> int | None:
     return max(left, right)
 
 
+def max_optional_float(left: float | None, right: float | None) -> float | None:
+    if left is None:
+        return right
+    if right is None:
+        return left
+    return max(left, right)
+
+
 def merge_dates(existing: str | None, incoming: str | None, pick: str) -> str | None:
     if existing is None:
         return incoming
@@ -848,12 +886,13 @@ def usage_record_from_mapping(mapping: dict, hint_name: str | None = None) -> tu
     if not lookup_key:
         return None
 
-    calls = coerce_int(first_present(mapping, COUNT_KEYS))
-    recent_30d_calls = coerce_int(first_present(mapping, RECENT_30D_KEYS))
-    recent_90d_calls = coerce_int(first_present(mapping, RECENT_90D_KEYS))
-    active_days = coerce_int(first_present(mapping, ACTIVE_DAYS_KEYS))
-    first_seen_at = normalize_dateish(first_present(mapping, FIRST_SEEN_KEYS))
-    last_used_at = normalize_dateish(first_present(mapping, LAST_USED_KEYS))
+    lowered = lowered_mapping(mapping)
+    calls = coerce_int(first_present(mapping, COUNT_KEYS, lowered))
+    recent_30d_calls = coerce_int(first_present(mapping, RECENT_30D_KEYS, lowered))
+    recent_90d_calls = coerce_int(first_present(mapping, RECENT_90D_KEYS, lowered))
+    active_days = coerce_int(first_present(mapping, ACTIVE_DAYS_KEYS, lowered))
+    first_seen_at = normalize_dateish(first_present(mapping, FIRST_SEEN_KEYS, lowered))
+    last_used_at = normalize_dateish(first_present(mapping, LAST_USED_KEYS, lowered))
 
     if calls is None and recent_90d_calls is not None:
         calls = recent_90d_calls
@@ -1029,11 +1068,11 @@ def infer_usage_from_history(paths: list[Path], skill_names: list[str]) -> dict[
 
 
 def pick_arm(entry: dict, keys: tuple[str, ...]) -> dict:
+    lowered = lowered_mapping(entry)
     for key in keys:
         value = entry.get(key)
         if isinstance(value, dict):
             return value
-    lowered = {str(key).lower(): value for key, value in entry.items()}
     for key in keys:
         value = lowered.get(key.lower())
         if isinstance(value, dict):
@@ -1042,7 +1081,7 @@ def pick_arm(entry: dict, keys: tuple[str, ...]) -> dict:
 
 
 def flat_metric(entry: dict, keys: tuple[str, ...], coercer):
-    value = first_present(entry, keys)
+    value = first_present(entry, keys, lowered_mapping(entry))
     return coercer(value)
 
 
@@ -1178,15 +1217,16 @@ def community_record_from_mapping(mapping: dict, hint_name: str | None = None) -
     if not lookup_key:
         return None
 
+    lowered = lowered_mapping(mapping)
     record = {
-        "rating": normalize_rating(first_present(mapping, COMMUNITY_RATING_KEYS)),
-        "stars": coerce_int(first_present(mapping, COMMUNITY_STARS_KEYS)),
-        "downloads": coerce_int(first_present(mapping, COMMUNITY_DOWNLOADS_KEYS)),
-        "installs_current": coerce_int(first_present(mapping, COMMUNITY_INSTALLS_CURRENT_KEYS)),
-        "installs_all_time": coerce_int(first_present(mapping, COMMUNITY_INSTALLS_ALL_TIME_KEYS)),
-        "trending_7d": coerce_int(first_present(mapping, COMMUNITY_TRENDING_KEYS)),
-        "comments_count": coerce_int(first_present(mapping, COMMUNITY_COMMENTS_KEYS)),
-        "last_updated": normalize_dateish(first_present(mapping, COMMUNITY_UPDATED_KEYS)),
+        "rating": normalize_rating(first_present(mapping, COMMUNITY_RATING_KEYS, lowered)),
+        "stars": coerce_int(first_present(mapping, COMMUNITY_STARS_KEYS, lowered)),
+        "downloads": coerce_int(first_present(mapping, COMMUNITY_DOWNLOADS_KEYS, lowered)),
+        "installs_current": coerce_int(first_present(mapping, COMMUNITY_INSTALLS_CURRENT_KEYS, lowered)),
+        "installs_all_time": coerce_int(first_present(mapping, COMMUNITY_INSTALLS_ALL_TIME_KEYS, lowered)),
+        "trending_7d": coerce_int(first_present(mapping, COMMUNITY_TRENDING_KEYS, lowered)),
+        "comments_count": coerce_int(first_present(mapping, COMMUNITY_COMMENTS_KEYS, lowered)),
+        "last_updated": normalize_dateish(first_present(mapping, COMMUNITY_UPDATED_KEYS, lowered)),
     }
     if not any(value is not None for value in record.values()):
         return None
@@ -1197,7 +1237,10 @@ def merge_community_record(store: dict[str, dict[str, object]], name: str, incom
     target = store.setdefault(name, empty_community_record())
     for key in ("stars", "downloads", "installs_current", "installs_all_time", "trending_7d", "comments_count"):
         target[key] = max_optional(coerce_int(target.get(key)), coerce_int(incoming.get(key)))
-    target["rating"] = coerce_float(incoming.get("rating")) if incoming.get("rating") is not None else target.get("rating")
+    target["rating"] = max_optional_float(
+        normalize_rating(target.get("rating")),
+        normalize_rating(incoming.get("rating")),
+    )
     target["last_updated"] = merge_dates(
         target.get("last_updated"),  # type: ignore[arg-type]
         incoming.get("last_updated"),  # type: ignore[arg-type]
@@ -1308,6 +1351,12 @@ def community_prior_score(entry: dict[str, object] | None) -> tuple[float | None
 
 def scan_risk(root: Path) -> dict[str, object]:
     hits: dict[str, dict[str, object]] = {}
+    skill_slug = ""
+    try:
+        frontmatter, _ = parse_frontmatter(read_text(root / "SKILL.md"))
+        skill_slug = normalize_name(frontmatter.get("slug", "") or frontmatter.get("name", ""))
+    except OSError:
+        skill_slug = ""
     for path in root.rglob("*"):
         if not path.is_file():
             continue
@@ -1318,6 +1367,8 @@ def scan_risk(root: Path) -> dict[str, object]:
         if "references" in relative_parts:
             continue
         if path.name == "SKILL.md":
+            continue
+        if skill_slug == SELF_AUDIT_SLUG and relative_path.as_posix() == SELF_AUDIT_SCRIPT:
             continue
         if path.suffix.lower() not in RISK_SCAN_SUFFIXES:
             continue
@@ -1330,8 +1381,8 @@ def scan_risk(root: Path) -> dict[str, object]:
             continue
         text = read_text(path).lower()
         relative = str(relative_path)
-        for rule in RISK_RULES:
-            if any(re.search(pattern, text, flags=re.IGNORECASE | re.MULTILINE) for pattern in rule["patterns"]):
+        for rule in COMPILED_RISK_RULES:
+            if any(pattern.search(text) for pattern in rule["patterns"]):
                 hit = hits.setdefault(
                     str(rule["label"]),
                     {"severity": float(rule["severity"]), "files": []},
@@ -1433,8 +1484,6 @@ def classify_skill(skill: dict[str, object]) -> str:
     if len(terms & API_SUPPORT_KEYWORDS) >= 2:
         return "api"
     if terms & TOOL_KEYWORDS:
-        return "tool"
-    if int(skill["scripts_count"]) >= 2 and terms & {"browser", "csv", "docx", "excel", "ocr", "pdf", "xlsx"}:
         return "tool"
     return "general"
 
@@ -1674,6 +1723,7 @@ def build_basis(
     ablation: dict[str, float] | None,
     community_prior: float | None,
     risk_flags: list[str],
+    evidence_note: str | None,
 ) -> str:
     parts = [f"calls={int(usage_record.get('calls', 0) or 0)}"]
     recent_30d_calls = coerce_int(usage_record.get("recent_30d_calls"))
@@ -1696,12 +1746,18 @@ def build_basis(
         parts.append(f"community={community_prior:.2f}")
     if risk_flags:
         parts.append(f"risk={short_risk_flags(risk_flags)}")
+    if evidence_note:
+        parts.append(f"note={evidence_note}")
     return "; ".join(parts)
+
+
+def escape_markdown_cell(value: object) -> str:
+    return str(value).replace("|", "\\|").replace("\n", "<br>")
 
 
 def markdown_table(headers: list[str], rows: list[list[str]]) -> str:
     lines = ["| " + " | ".join(headers) + " |", "| " + " | ".join(["---"] * len(headers)) + " |"]
-    lines.extend("| " + " | ".join(row) + " |" for row in rows)
+    lines.extend("| " + " | ".join(escape_markdown_cell(cell) for cell in row) + " |" for row in rows)
     return "\n".join(lines)
 
 
@@ -1713,6 +1769,17 @@ def fmt_optional_int(value) -> str:
 def fmt_optional_float(value, digits: int = 2) -> str:
     coerced = coerce_float(value)
     return "-" if coerced is None else f"{coerced:.{digits}f}"
+
+
+def existing_paths(label: str, raw_paths: list[str] | None) -> list[Path]:
+    paths = [Path(item).expanduser().resolve() for item in (raw_paths or [])]
+    existing: list[Path] = []
+    for path in paths:
+        if path.exists():
+            existing.append(path)
+            continue
+        print(f"warning: {label} file not found: {path}", file=sys.stderr)
+    return existing
 
 
 def run_audit(args: argparse.Namespace) -> int:
@@ -1727,10 +1794,10 @@ def run_audit(args: argparse.Namespace) -> int:
     skills = [scan_skill(path) for path in skill_files]
     names = [skill["name"] for skill in skills]
     alias_counts = Counter(key for skill in skills for key in skill_lookup_keys(skill))
-    usage_paths = [Path(item).expanduser().resolve() for item in (args.usage_file or [])]
-    history_paths = [Path(item).expanduser().resolve() for item in (args.history_file or [])]
-    ablation_paths = [Path(item).expanduser().resolve() for item in (args.ablation_file or [])]
-    community_paths = [Path(item).expanduser().resolve() for item in (args.community_file or [])]
+    usage_paths = existing_paths("usage", args.usage_file)
+    history_paths = existing_paths("history", args.history_file)
+    ablation_paths = existing_paths("ablation", args.ablation_file)
+    community_paths = existing_paths("community", args.community_file)
 
     usage = load_usage(usage_paths) if usage_paths else {}
     history_usage = infer_usage_from_history(history_paths, names) if history_paths else {}
@@ -1750,17 +1817,28 @@ def run_audit(args: argparse.Namespace) -> int:
                 best_overlap = overlap
                 best_peer = skill_display_name(other, alias_counts)
 
-        usage_record = resolve_record(usage, skill, alias_counts)
+        evidence_notes: list[str] = []
+        usage_record, usage_note = resolve_record(usage, skill, alias_counts)
+        if usage_note:
+            evidence_notes.append(f"usage={usage_note}")
         usage_source = "usage"
         if usage_record is None:
-            usage_record = resolve_record(history_usage, skill, alias_counts) or {"calls": 0}
+            usage_record, history_note = resolve_record(history_usage, skill, alias_counts)
+            if history_note:
+                evidence_notes.append(f"history={history_note}")
+            usage_record = usage_record or {"calls": 0}
             usage_source = "history" if history_paths else "missing"
 
         evidence_weight = usage_evidence_weight(usage_source)
         calls = int(usage_record.get("calls", 0) or 0)
-        ablation_summary = resolve_record(ablation, skill, alias_counts)
-        community_entry = resolve_record(community, skill, alias_counts)
+        ablation_summary, ablation_note = resolve_record(ablation, skill, alias_counts)
+        if ablation_note:
+            evidence_notes.append(f"ablation={ablation_note}")
+        community_entry, community_note = resolve_record(community, skill, alias_counts)
+        if community_note:
+            evidence_notes.append(f"community={community_note}")
         community_prior, community_conf = community_prior_score(community_entry)
+        evidence_note = " | ".join(dict.fromkeys(evidence_notes)) if evidence_notes else None
 
         u_score = usage_score(usage_record, evidence_weight)
         uniq_score = uniqueness_score(best_overlap)
@@ -1822,6 +1900,7 @@ def run_audit(args: argparse.Namespace) -> int:
                 "risk_score": skill["risk_score"],
                 "risk_flags": skill["risk_flags"],
                 "risk_evidence": skill["risk_evidence"],
+                "evidence_note": evidence_note,
                 "basis": build_basis(
                     usage_record,
                     usage_source,
@@ -1832,6 +1911,7 @@ def run_audit(args: argparse.Namespace) -> int:
                     ablation_summary,
                     community_prior,
                     list(skill["risk_flags"]),
+                    evidence_note,
                 ),
                 "missing_usage": usage_source == "missing",
                 "missing_ablation": kind == "general" and not ablation_summary,

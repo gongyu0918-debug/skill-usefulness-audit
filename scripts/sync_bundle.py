@@ -25,16 +25,27 @@ def write_text(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
-def bundle_frontmatter(source_text: str, version: str) -> str:
-    body_start = source_text.find("\n---", 3)
-    if not source_text.startswith("---") or body_start == -1:
+def parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
+    if not text.startswith("---"):
         raise ValueError("codex-skill/SKILL.md is missing expected frontmatter")
-    body = source_text[body_start + 4 :].lstrip("\r\n")
-    description = ""
-    for line in source_text[4:body_start].splitlines():
-        if line.startswith("description:"):
-            description = line.split(":", 1)[1].strip()
-            break
+    parts = text.split("---", 2)
+    if len(parts) < 3:
+        raise ValueError("codex-skill/SKILL.md is missing expected frontmatter")
+
+    raw_yaml = parts[1]
+    body = parts[2].lstrip("\r\n")
+    data: dict[str, str] = {}
+    for line in raw_yaml.splitlines():
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        data[key.strip()] = value.strip().strip('"').strip("'")
+    return data, body
+
+
+def bundle_frontmatter(source_text: str, version: str) -> str:
+    frontmatter, body = parse_frontmatter(source_text)
+    description = frontmatter.get("description", "")
     homepage = github_homepage()
     frontmatter = [
         "---",

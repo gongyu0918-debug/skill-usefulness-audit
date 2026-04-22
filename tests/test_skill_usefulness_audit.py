@@ -1,17 +1,33 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from datetime import date
 from pathlib import Path
+from unittest import mock
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 AUDIT_SCRIPT = REPO_ROOT / "codex-skill" / "scripts" / "skill_usefulness_audit.py"
 SYNC_SCRIPT = REPO_ROOT / "scripts" / "sync_bundle.py"
+
+
+def load_module(path: Path, module_name: str):
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"unable to load module from {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+AUDIT_MODULE = load_module(AUDIT_SCRIPT, "skill_usefulness_audit_module")
+SYNC_MODULE = load_module(SYNC_SCRIPT, "sync_bundle_module")
 
 
 def write_skill(root: Path, name: str, description: str, extra_body: str = "") -> Path:
@@ -39,7 +55,7 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
 
     def run_audit(self, *args: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
-            ["python", str(AUDIT_SCRIPT), "audit", *args],
+            [sys.executable, str(AUDIT_SCRIPT), "audit", *args],
             cwd=REPO_ROOT,
             text=True,
             capture_output=True,
@@ -436,13 +452,90 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
         self.assertEqual(first["overlap_peer"], "frontend-skill@skills-b")
         self.assertEqual(second["overlap_peer"], "frontend-skill@skills-a")
 
+    def test_ambiguous_name_evidence_adds_note(self) -> None:
+        root_a = self.tempdir / "skills-a"
+        root_b = self.tempdir / "skills-b"
+        write_skill(root_a, "frontend-skill", "Build bold landing pages with image-led hierarchy.")
+        write_skill(root_b, "frontend-skill", "Build bold landing pages with image-led hierarchy.")
+
+        usage_path = self.tempdir / "usage.json"
+        usage_path.write_text(json.dumps([{"name": "frontend-skill", "calls": 5}]), encoding="utf-8")
+
+        payload = self.run_audit_json(
+            "--skills-root",
+            str(root_a),
+            "--skills-root",
+            str(root_b),
+            "--usage-file",
+            str(usage_path),
+        )
+
+        rows = self.results_named(payload, "frontend-skill")
+        self.assertEqual(len(rows), 2)
+        for row in rows:
+            self.assertEqual(row["calls"], 0)
+            self.assertIn("ambiguous name evidence", row["evidence_note"])
+
+    def test_missing_usage_file_emits_warning(self) -> None:
+        skills_root = self.tempdir / "skills"
+        write_skill(skills_root, "emotion-orchestrator", "Detect emotion and route reply style.")
+
+        missing_usage = self.tempdir / "usge.json"
+        result = self.run_audit(
+            "--skills-root",
+            str(skills_root),
+            "--usage-file",
+            str(missing_usage),
+        )
+
+        self.assertIn("warning: usage file not found", result.stderr.lower())
+
+    def test_normalize_pathish_preserves_case_when_normcase_does(self) -> None:
+        upper_path = self.tempdir / "Foo" / "skill"
+        lower_path = self.tempdir / "foo" / "skill"
+
+        with mock.patch.object(AUDIT_MODULE.os.path, "normcase", side_effect=lambda value: value):
+            normalized_upper = AUDIT_MODULE.normalize_pathish(upper_path)
+            normalized_lower = AUDIT_MODULE.normalize_pathish(lower_path)
+
+        self.assertNotEqual(normalized_upper, normalized_lower)
+
+    def test_merge_community_record_uses_deterministic_rating(self) -> None:
+        store: dict[str, dict[str, object]] = {}
+        AUDIT_MODULE.merge_community_record(store, "example", {"rating": 4.2})
+        AUDIT_MODULE.merge_community_record(store, "example", {"rating": 4.8})
+        self.assertEqual(store["example"]["rating"], 4.8)
+
+        store = {}
+        AUDIT_MODULE.merge_community_record(store, "example", {"rating": 4.8})
+        AUDIT_MODULE.merge_community_record(store, "example", {"rating": 4.2})
+        self.assertEqual(store["example"]["rating"], 4.8)
+
+    def test_sync_bundle_frontmatter_handles_crlf_and_quoted_description(self) -> None:
+        source_text = (
+            "---\r\n"
+            "name: skill-usefulness-audit\r\n"
+            'description: "Audit installed skills."\r\n'
+            "---\r\n\r\n"
+            "# skill-usefulness-audit\r\n"
+        )
+
+        bundled = SYNC_MODULE.bundle_frontmatter(source_text, "0.2.3")
+
+        self.assertIn("description: Audit installed skills.", bundled)
+        self.assertIn("version: 0.2.3", bundled)
+        self.assertIn("# skill-usefulness-audit", bundled)
+
     def test_sync_bundle_writes_publish_manifest(self) -> None:
-        subprocess.run(["python", str(SYNC_SCRIPT)], cwd=REPO_ROOT, check=True, text=True, capture_output=True)
+        subprocess.run([sys.executable, str(SYNC_SCRIPT)], cwd=REPO_ROOT, check=True, text=True, capture_output=True)
         bundle_skill = (REPO_ROOT / "skill" / "SKILL.md").read_text(encoding="utf-8")
+        source_script = (REPO_ROOT / "codex-skill" / "scripts" / "skill_usefulness_audit.py").read_text(encoding="utf-8")
+        bundle_script = (REPO_ROOT / "skill" / "scripts" / "skill_usefulness_audit.py").read_text(encoding="utf-8")
         self.assertIn("slug: skill-usefulness-audit", bundle_skill)
-        self.assertIn("version: 0.2.2", bundle_skill)
+        self.assertIn("version: 0.2.3", bundle_skill)
         self.assertIn("审计已安装 skill 是否还有真实价值", bundle_skill)
         self.assertFalse((REPO_ROOT / "skill" / "scripts" / "__pycache__").exists())
+        self.assertEqual(bundle_script, source_script)
 
     def test_output_directories_are_created(self) -> None:
         skills_root = self.tempdir / "skills"

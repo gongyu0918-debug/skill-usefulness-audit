@@ -70,6 +70,7 @@ Native usage logs are stronger than transcript mentions. History fallback is the
 - `community`: JSON、JSONL、CSV、TSV，适合离线导出的 registry 指标
 
 同名 skill 会优先按 `path / namespace / source` 解析。只给名字、又遇到重名时，这份证据会保守处理。
+输入文件路径写错时，CLI 会直接在 stderr 打 warning。
 
 ## Input Formats
 
@@ -81,6 +82,7 @@ Supported inputs:
 - `community`: JSON, JSONL, CSV, TSV
 
 Duplicate skill names resolve through `path`, `namespace`, and `source` before falling back to name-only matching.
+Missing input files print a warning to stderr so bad paths are visible immediately.
 
 ## 本地开发检查
 
@@ -107,14 +109,14 @@ python codex-skill/scripts/skill_usefulness_audit.py audit \
 ## 目录
 
 - `codex-skill/`: 运行时 skill 源文件
-- `skill/`: ClawHub 发布包
+- `skill/`: ClawHub 发布包，保持和运行时代码同步入库
 - `tests/`: 兼容性和回归测试
 - `scripts/sync_bundle.py`: 从 `codex-skill/` 同步生成 `skill/`
 
 ## Layout
 
 - `codex-skill/`: runtime skill source
-- `skill/`: ClawHub publish bundle
+- `skill/`: ClawHub publish bundle kept in sync with the runtime source
 - `tests/`: regression and compatibility tests
 - `scripts/sync_bundle.py`: sync `codex-skill/` into `skill/`
 
@@ -122,12 +124,12 @@ python codex-skill/scripts/skill_usefulness_audit.py audit \
 
 ```bash
 python scripts/sync_bundle.py
-clawhub publish ./skill --slug skill-usefulness-audit --name "skill-usefulness-audit" --version 0.2.2 --tags latest,audit,skills --changelog "Reduce ClawHub scan false positives, rename protected-path risk labels, and keep audit behavior intact"
+clawhub publish ./skill --slug skill-usefulness-audit --name "skill-usefulness-audit" --version 0.2.3 --tags latest,audit,skills --changelog "Fix duplicate-name evidence routing, make bundle sync CRLF-safe, add missing-file warnings, and tighten risk scanning"
 ```
 
 ## Publish
 
 ```bash
 python scripts/sync_bundle.py
-clawhub publish ./skill --slug skill-usefulness-audit --name "skill-usefulness-audit" --version 0.2.2 --tags latest,audit,skills --changelog "Reduce ClawHub scan false positives, rename protected-path risk labels, and keep audit behavior intact"
+clawhub publish ./skill --slug skill-usefulness-audit --name "skill-usefulness-audit" --version 0.2.3 --tags latest,audit,skills --changelog "Fix duplicate-name evidence routing, make bundle sync CRLF-safe, add missing-file warnings, and tighten risk scanning"
 ```

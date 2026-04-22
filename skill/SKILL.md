@@ -2,7 +2,7 @@
 name: skill-usefulness-audit
 slug: skill-usefulness-audit
 description: Audit whether installed skills still create real value. 审计已安装 skill 是否还有真实价值。Use only when the user explicitly asks to review, score, rank, consolidate, or delete installed skills across Codex, OpenClaw, Claude Code, or similar agent hosts. 当用户明确要求审查、评分、排序、合并或删除已安装 skill 时使用。This skill checks usage evidence, loads installed skill instructions, detects functional overlap, runs ablation on history for non-API and non-tool skills, scans risk signals, accepts optional offline registry metrics, then outputs a 10-point local score table, evidence, and action recommendations. 它会检查使用证据、读取已装 skill 说明、识别功能重叠、对非 API 与非工具型 skill 跑历史消融、扫描风险信号，并可读取离线社区指标，最后输出 10 分制本地评分表、判定依据和动作建议。
-version: 0.2.2
+version: 0.2.3
 tags: [audit, skills, ablation, codex, openclaw]
 homepage: https://github.com/gongyu0918-debug/skill-usefulness-audit
 ---
