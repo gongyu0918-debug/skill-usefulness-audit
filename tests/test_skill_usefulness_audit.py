@@ -144,6 +144,32 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
         self.assertIn("| 1 | emotion-orchestrator |", result.stdout)
         self.assertIn("calls=2", result.stdout)
 
+    def test_history_fallback_matches_separator_variants(self) -> None:
+        skills_root = self.tempdir / "skills"
+        write_skill(skills_root, "tone-polisher", "Rewrite text with polished tone.")
+
+        history_path = self.tempdir / "history.jsonl"
+        history_path.write_text(
+            "\n".join(
+                [
+                    json.dumps({"role": "user", "text": "Used tone-polisher earlier."}),
+                    json.dumps({"role": "assistant", "text": "Also tried tone polisher and tone_polisher."}),
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        payload = self.run_audit_json(
+            "--skills-root",
+            str(skills_root),
+            "--history-file",
+            str(history_path),
+        )
+
+        item = self.first_result(payload, "tone-polisher")
+        self.assertEqual(item["calls"], 3)
+        self.assertEqual(item["usage_source"], "history")
+
     def test_nested_usage_with_chinese_keys_is_supported(self) -> None:
         skills_root = self.tempdir / "skills"
         today = date.today().isoformat()
@@ -355,6 +381,19 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
         self.assertGreater(item["community_prior_score"], 0.2)
         self.assertEqual(item["usage_source"], "usage")
 
+    def test_community_prior_uses_lifetime_installs_and_comments(self) -> None:
+        score, confidence = AUDIT_MODULE.community_prior_score(
+            {
+                "installs_all_time": 3200,
+                "comments_count": 14,
+            }
+        )
+
+        self.assertIsNotNone(score)
+        self.assertIsNotNone(confidence)
+        self.assertGreater(score or 0.0, 0.0)
+        self.assertGreater(confidence or 0.0, 0.0)
+
     def test_risk_scan_flags_high_risk_skill(self) -> None:
         skills_root = self.tempdir / "skills"
         skill_dir = write_skill(skills_root, "network-installer", "Install helpers by downloading scripts.")
@@ -391,6 +430,36 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
         item = self.first_result(payload, "doc-heavy-skill")
         self.assertEqual(item["risk_level"], "none")
         self.assertEqual(item["risk_flags"], [])
+
+    def test_scan_skill_reads_skill_markdown_once(self) -> None:
+        skills_root = self.tempdir / "skills"
+        skill_dir = write_skill(skills_root, "single-read-skill", "Explain usage once.")
+        (skill_dir / "scripts" / "run.py").write_text("print('ok')\n", encoding="utf-8")
+        original_read_text = AUDIT_MODULE.read_text
+        skill_md_reads = 0
+
+        def counting_read_text(path: Path) -> str:
+            nonlocal skill_md_reads
+            if Path(path).name == "SKILL.md":
+                skill_md_reads += 1
+            return original_read_text(path)
+
+        with mock.patch.object(AUDIT_MODULE, "read_text", side_effect=counting_read_text):
+            AUDIT_MODULE.scan_skill(skill_dir / "SKILL.md")
+
+        self.assertEqual(skill_md_reads, 1)
+
+    def test_scan_risk_can_skip_current_script_by_relative_path(self) -> None:
+        skill_dir = self.tempdir / "renamed-audit-skill"
+        (skill_dir / "scripts" / "audit").mkdir(parents=True, exist_ok=True)
+        (skill_dir / "SKILL.md").write_text("---\nname: renamed-audit-skill\ndescription: test\n---\n", encoding="utf-8")
+        risky_script = skill_dir / "scripts" / "audit" / "main.py"
+        risky_script.write_text("import subprocess\nsubprocess.run('echo test', shell=True)\n", encoding="utf-8")
+
+        risk = AUDIT_MODULE.scan_risk(skill_dir, self_relative_path=Path("scripts") / "audit" / "main.py")
+
+        self.assertEqual(risk["risk_level"], "none")
+        self.assertEqual(risk["risk_flags"], [])
 
     def test_community_csv_is_supported(self) -> None:
         skills_root = self.tempdir / "skills"
@@ -520,10 +589,10 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
             "# skill-usefulness-audit\r\n"
         )
 
-        bundled = SYNC_MODULE.bundle_frontmatter(source_text, "0.2.3")
+        bundled = SYNC_MODULE.bundle_frontmatter(source_text, "0.2.4")
 
         self.assertIn("description: Audit installed skills.", bundled)
-        self.assertIn("version: 0.2.3", bundled)
+        self.assertIn("version: 0.2.4", bundled)
         self.assertIn("# skill-usefulness-audit", bundled)
 
     def test_sync_bundle_writes_publish_manifest(self) -> None:
@@ -532,10 +601,15 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
         source_script = (REPO_ROOT / "codex-skill" / "scripts" / "skill_usefulness_audit.py").read_text(encoding="utf-8")
         bundle_script = (REPO_ROOT / "skill" / "scripts" / "skill_usefulness_audit.py").read_text(encoding="utf-8")
         self.assertIn("slug: skill-usefulness-audit", bundle_skill)
-        self.assertIn("version: 0.2.3", bundle_skill)
+        self.assertIn("version: 0.2.4", bundle_skill)
         self.assertIn("审计已安装 skill 是否还有真实价值", bundle_skill)
         self.assertFalse((REPO_ROOT / "skill" / "scripts" / "__pycache__").exists())
         self.assertEqual(bundle_script, source_script)
+
+    def test_markdown_table_escapes_headers(self) -> None:
+        table = AUDIT_MODULE.markdown_table(["A|B"], [["1|2"]])
+        self.assertIn("A\\|B", table)
+        self.assertIn("1\\|2", table)
 
     def test_output_directories_are_created(self) -> None:
         skills_root = self.tempdir / "skills"

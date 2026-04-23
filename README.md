@@ -88,6 +88,7 @@ Missing input files print a warning to stderr so bad paths are visible immediate
 
 ```bash
 python scripts/sync_bundle.py
+git diff --exit-code -- skill/
 python -m unittest discover -s tests -v
 python codex-skill/scripts/skill_usefulness_audit.py audit \
   --skills-root codex-skill \
@@ -99,6 +100,7 @@ python codex-skill/scripts/skill_usefulness_audit.py audit \
 
 ```bash
 python scripts/sync_bundle.py
+git diff --exit-code -- skill/
 python -m unittest discover -s tests -v
 python codex-skill/scripts/skill_usefulness_audit.py audit \
   --skills-root codex-skill \
@@ -124,12 +126,12 @@ python codex-skill/scripts/skill_usefulness_audit.py audit \
 
 ```bash
 python scripts/sync_bundle.py
-clawhub publish ./skill --slug skill-usefulness-audit --name "skill-usefulness-audit" --version 0.2.3 --tags latest,audit,skills --changelog "Fix duplicate-name evidence routing, make bundle sync CRLF-safe, add missing-file warnings, and tighten risk scanning"
+clawhub publish ./skill --slug skill-usefulness-audit --name "skill-usefulness-audit" --version 0.2.4 --tags latest,audit,skills --changelog "Use lifetime community signals, improve history fallback recall, remove redundant risk reads, and validate bundle drift in CI"
 ```
 
 ## Publish
 
 ```bash
 python scripts/sync_bundle.py
-clawhub publish ./skill --slug skill-usefulness-audit --name "skill-usefulness-audit" --version 0.2.3 --tags latest,audit,skills --changelog "Fix duplicate-name evidence routing, make bundle sync CRLF-safe, add missing-file warnings, and tighten risk scanning"
+clawhub publish ./skill --slug skill-usefulness-audit --name "skill-usefulness-audit" --version 0.2.4 --tags latest,audit,skills --changelog "Use lifetime community signals, improve history fallback recall, remove redundant risk reads, and validate bundle drift in CI"
 ```

@@ -44,10 +44,10 @@ def parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
 
 
 def bundle_frontmatter(source_text: str, version: str) -> str:
-    frontmatter, body = parse_frontmatter(source_text)
-    description = frontmatter.get("description", "")
+    source_frontmatter, body = parse_frontmatter(source_text)
+    description = source_frontmatter.get("description", "")
     homepage = github_homepage()
-    frontmatter = [
+    output_lines = [
         "---",
         "name: skill-usefulness-audit",
         "slug: skill-usefulness-audit",
@@ -56,9 +56,9 @@ def bundle_frontmatter(source_text: str, version: str) -> str:
         "tags: [audit, skills, ablation, codex, openclaw]",
     ]
     if homepage:
-        frontmatter.append(f"homepage: {homepage}")
-    frontmatter.extend(["---", ""])
-    return "\n".join(frontmatter) + body
+        output_lines.append(f"homepage: {homepage}")
+    output_lines.extend(["---", ""])
+    return "\n".join(output_lines) + body
 
 
 def github_homepage() -> str | None:

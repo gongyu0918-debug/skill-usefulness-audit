@@ -1,0 +1,29 @@
+name: Validate Bundle
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Compile Python files
+        run: python -m py_compile codex-skill/scripts/skill_usefulness_audit.py scripts/sync_bundle.py tests/test_skill_usefulness_audit.py
+
+      - name: Sync publish bundle
+        run: python scripts/sync_bundle.py
+
+      - name: Verify bundle drift
+        run: git diff --exit-code -- skill/
+
+      - name: Run tests
+        run: python -m unittest discover -s tests -v

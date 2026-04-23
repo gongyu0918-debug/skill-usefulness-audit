@@ -476,9 +476,6 @@ COMPILED_RISK_RULES = tuple(
     for rule in RISK_RULES
 )
 
-SELF_AUDIT_SLUG = "skill-usefulness-audit"
-SELF_AUDIT_SCRIPT = "scripts/skill_usefulness_audit.py"
-
 
 def clamp(value: float, low: float, high: float) -> float:
     return max(low, min(high, value))
@@ -651,6 +648,13 @@ def coerce_float(value) -> float | None:
         except ValueError:
             return None
     return None
+
+
+def current_script_relative_to(root: Path) -> Path | None:
+    try:
+        return Path(__file__).resolve().relative_to(root.resolve())
+    except ValueError:
+        return None
 
 
 def coerce_bool(value) -> bool | None:
@@ -1047,10 +1051,13 @@ def load_usage(paths: list[Path]) -> dict[str, dict[str, object]]:
 
 def infer_usage_from_history(paths: list[Path], skill_names: list[str]) -> dict[str, dict[str, object]]:
     usage = {f"name:{name}": {"calls": 0} for name in skill_names}
-    patterns = {
-        f"name:{name}": re.compile(rf"(?<![a-z0-9])\$?{re.escape(name)}(?![a-z0-9])", re.IGNORECASE)
-        for name in skill_names
-    }
+    patterns = {}
+    for name in skill_names:
+        alias_pattern = re.escape(name).replace(r"\-", r"[-\s_]?")
+        patterns[f"name:{name}"] = re.compile(
+            rf"(?<![a-z0-9])\$?{alias_pattern}(?![a-z0-9])",
+            re.IGNORECASE,
+        )
     for path in paths:
         if not path.exists():
             continue
@@ -1313,25 +1320,35 @@ def community_prior_score(entry: dict[str, object] | None) -> tuple[float | None
     confidence = 0.0
     rating = coerce_float(entry.get("rating"))
     if rating is not None:
-        score += clamp(rating / 5.0, 0.0, 1.0) * 0.35
-        confidence += 0.20
+        score += clamp(rating / 5.0, 0.0, 1.0) * 0.30
+        confidence += 0.15
 
     volume = coerce_int(entry.get("installs_current"))
     if volume is None:
         volume = coerce_int(entry.get("downloads"))
     if volume is not None:
-        score += clamp(math.log1p(volume) / math.log1p(5000), 0.0, 1.0) * 0.25
-        confidence += 0.20
+        score += clamp(math.log1p(volume) / math.log1p(5000), 0.0, 1.0) * 0.20
+        confidence += 0.15
+
+    installs_all_time = coerce_int(entry.get("installs_all_time"))
+    if installs_all_time is not None:
+        score += clamp(math.log1p(installs_all_time) / math.log1p(20000), 0.0, 1.0) * 0.10
+        confidence += 0.10
 
     trending = coerce_int(entry.get("trending_7d"))
     if trending is not None:
-        score += clamp(math.log1p(trending) / math.log1p(250), 0.0, 1.0) * 0.20
-        confidence += 0.20
+        score += clamp(math.log1p(trending) / math.log1p(250), 0.0, 1.0) * 0.15
+        confidence += 0.15
 
     stars = coerce_int(entry.get("stars"))
     if stars is not None:
         score += clamp(math.log1p(stars) / math.log1p(250), 0.0, 1.0) * 0.10
-        confidence += 0.15
+        confidence += 0.10
+
+    comments_count = coerce_int(entry.get("comments_count"))
+    if comments_count is not None:
+        score += clamp(math.log1p(comments_count) / math.log1p(100), 0.0, 1.0) * 0.05
+        confidence += 0.10
 
     last_updated_days = days_since(entry.get("last_updated"))
     if last_updated_days is not None:
@@ -1349,14 +1366,8 @@ def community_prior_score(entry: dict[str, object] | None) -> tuple[float | None
     return round(clamp(score, 0.0, 1.0), 2), round(clamp(confidence, 0.0, 1.0), 2)
 
 
-def scan_risk(root: Path) -> dict[str, object]:
+def scan_risk(root: Path, self_relative_path: Path | None = None) -> dict[str, object]:
     hits: dict[str, dict[str, object]] = {}
-    skill_slug = ""
-    try:
-        frontmatter, _ = parse_frontmatter(read_text(root / "SKILL.md"))
-        skill_slug = normalize_name(frontmatter.get("slug", "") or frontmatter.get("name", ""))
-    except OSError:
-        skill_slug = ""
     for path in root.rglob("*"):
         if not path.is_file():
             continue
@@ -1368,7 +1379,7 @@ def scan_risk(root: Path) -> dict[str, object]:
             continue
         if path.name == "SKILL.md":
             continue
-        if skill_slug == SELF_AUDIT_SLUG and relative_path.as_posix() == SELF_AUDIT_SCRIPT:
+        if self_relative_path is not None and relative_path == self_relative_path:
             continue
         if path.suffix.lower() not in RISK_SCAN_SUFFIXES:
             continue
@@ -1428,7 +1439,7 @@ def scan_skill(skill_md: Path) -> dict[str, object]:
     fingerprint = " ".join(
         [name, description, " ".join(headings), " ".join(script_files), " ".join(reference_files)]
     )
-    risk = scan_risk(root)
+    risk = scan_risk(root, self_relative_path=current_script_relative_to(root))
     return {
         "name": name,
         "slug": slug,
@@ -1756,7 +1767,8 @@ def escape_markdown_cell(value: object) -> str:
 
 
 def markdown_table(headers: list[str], rows: list[list[str]]) -> str:
-    lines = ["| " + " | ".join(headers) + " |", "| " + " | ".join(["---"] * len(headers)) + " |"]
+    escaped_headers = [escape_markdown_cell(header) for header in headers]
+    lines = ["| " + " | ".join(escaped_headers) + " |", "| " + " | ".join(["---"] * len(headers)) + " |"]
     lines.extend("| " + " | ".join(escape_markdown_cell(cell) for cell in row) + " |" for row in rows)
     return "\n".join(lines)
 
