@@ -382,7 +382,7 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
         self.assertEqual(item["usage_source"], "usage")
 
     def test_community_prior_uses_lifetime_installs_and_comments(self) -> None:
-        score, confidence = AUDIT_MODULE.community_prior_score(
+        score, confidence, breakdown = AUDIT_MODULE.community_prior_score(
             {
                 "installs_all_time": 3200,
                 "comments_count": 14,
@@ -393,6 +393,45 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
         self.assertIsNotNone(confidence)
         self.assertGreater(score or 0.0, 0.0)
         self.assertGreater(confidence or 0.0, 0.0)
+        self.assertIn("installs_all_time", breakdown)
+        self.assertIn("comments_count", breakdown)
+
+    def test_markdown_report_includes_community_breakdown(self) -> None:
+        skills_root = self.tempdir / "skills"
+        today = date.today().isoformat()
+        write_skill(skills_root, "prompt-helper", "Rewrite prompts for clearer task execution.")
+
+        community_path = self.tempdir / "community.json"
+        community_path.write_text(
+            json.dumps(
+                [
+                    {
+                        "name": "prompt-helper",
+                        "rating": 4.8,
+                        "installs_all_time": 3200,
+                        "comments_count": 14,
+                        "last_updated": today,
+                    }
+                ]
+            ),
+            encoding="utf-8",
+        )
+        markdown_out = self.tempdir / "report.md"
+
+        self.run_audit(
+            "--skills-root",
+            str(skills_root),
+            "--community-file",
+            str(community_path),
+            "--markdown-out",
+            str(markdown_out),
+        )
+
+        report = markdown_out.read_text(encoding="utf-8")
+        self.assertIn("## Community Signal Breakdown", report)
+        self.assertIn("rating=", report)
+        self.assertIn("installs_all_time=", report)
+        self.assertIn("comments_count=", report)
 
     def test_risk_scan_flags_high_risk_skill(self) -> None:
         skills_root = self.tempdir / "skills"
@@ -589,10 +628,10 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
             "# skill-usefulness-audit\r\n"
         )
 
-        bundled = SYNC_MODULE.bundle_frontmatter(source_text, "0.2.4")
+        bundled = SYNC_MODULE.bundle_frontmatter(source_text, "0.2.5")
 
         self.assertIn("description: Audit installed skills.", bundled)
-        self.assertIn("version: 0.2.4", bundled)
+        self.assertIn("version: 0.2.5", bundled)
         self.assertIn("# skill-usefulness-audit", bundled)
 
     def test_sync_bundle_writes_publish_manifest(self) -> None:
@@ -601,8 +640,8 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
         source_script = (REPO_ROOT / "codex-skill" / "scripts" / "skill_usefulness_audit.py").read_text(encoding="utf-8")
         bundle_script = (REPO_ROOT / "skill" / "scripts" / "skill_usefulness_audit.py").read_text(encoding="utf-8")
         self.assertIn("slug: skill-usefulness-audit", bundle_skill)
-        self.assertIn("version: 0.2.4", bundle_skill)
-        self.assertIn("审计已安装 skill 是否还有真实价值", bundle_skill)
+        self.assertIn("version: 0.2.5", bundle_skill)
+        self.assertIn("Finds unused, overlapping, risky, or under-evidenced agent skills", bundle_skill)
         self.assertFalse((REPO_ROOT / "skill" / "scripts" / "__pycache__").exists())
         self.assertEqual(bundle_script, source_script)
 
@@ -610,6 +649,37 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
         table = AUDIT_MODULE.markdown_table(["A|B"], [["1|2"]])
         self.assertIn("A\\|B", table)
         self.assertIn("1\\|2", table)
+
+    def test_json_output_includes_report_mode_and_score_breakdown(self) -> None:
+        skills_root = self.tempdir / "skills"
+        write_skill(skills_root, "prompt-helper", "Rewrite prompts for clearer task execution.")
+
+        usage_path = self.tempdir / "usage.json"
+        usage_path.write_text(json.dumps([{"name": "prompt-helper", "calls": 3}]), encoding="utf-8")
+
+        payload = self.run_audit_json(
+            "--skills-root",
+            str(skills_root),
+            "--usage-file",
+            str(usage_path),
+        )
+
+        item = self.first_result(payload, "prompt-helper")
+        self.assertEqual(payload["report_mode"], "partial-evidence")
+        self.assertIn("score_breakdown", item)
+        self.assertEqual(item["score_breakdown"]["usage"]["calls"], 3)
+        self.assertIn("community", item["score_breakdown"])
+
+    def test_structure_only_report_mode_without_evidence_files(self) -> None:
+        skills_root = self.tempdir / "skills"
+        write_skill(skills_root, "prompt-helper", "Rewrite prompts for clearer task execution.")
+
+        payload = self.run_audit_json(
+            "--skills-root",
+            str(skills_root),
+        )
+
+        self.assertEqual(payload["report_mode"], "structure-only")
 
     def test_output_directories_are_created(self) -> None:
         skills_root = self.tempdir / "skills"

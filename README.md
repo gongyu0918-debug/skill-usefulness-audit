@@ -1,35 +1,12 @@
 # skill-usefulness-audit
 
-装的 skill 越多，清理就越容易靠感觉。
+Your agent has too many skills. This shows which ones still earn their place.
 
-`skill-usefulness-audit` 会把每个 skill 的近期使用、功能重叠、消融收益、社区信号和执行风险放到一张表里，给出 `keep / review / merge-delete / quarantine-review` 建议。
+`skill-usefulness-audit` scans installed agent skills and produces a cleanup report: recent use, overlap, ablation impact, risk flags, confidence, and optional community signals. The output is meant for decisions: keep, review, merge, delete, or quarantine.
 
-`skill-usefulness-audit` audits installed skills with one goal: show which ones still earn their place. It combines local usage, overlap, ablation impact, offline community signals, and execution risk into one report.
+## Quick Start
 
-## 适合谁
-
-- 想清理挂载 skill，手里没有一份像样证据
-- 想知道哪些 skill 只是功能重复
-- 想把“本地常用”和“社区热门”分开看
-- 想给团队留一份可复盘的技能盘点结果
-
-## Who It Helps
-
-- Teams cleaning up crowded skill lists
-- Builders comparing overlapping skills
-- People who want local evidence and registry signals side by side
-- Anyone who wants an audit they can rerun and diff later
-
-## 30 秒跑起来
-
-```bash
-python codex-skill/scripts/skill_usefulness_audit.py audit \
-  --skills-root codex-skill \
-  --markdown-out test-output/report.md \
-  --json-out test-output/report.json
-```
-
-审计真实宿主里的技能时，直接把 `--skills-root` 指向你的 skill 目录。
+Audit your local Codex skills:
 
 ```bash
 python codex-skill/scripts/skill_usefulness_audit.py audit \
@@ -38,53 +15,67 @@ python codex-skill/scripts/skill_usefulness_audit.py audit \
   --json-out skill-audit-report.json
 ```
 
-When auditing a real host, point `--skills-root` at the installed skill directories and keep the same output flags.
+Audit multiple roots:
 
-## 结果怎么看
+```bash
+python codex-skill/scripts/skill_usefulness_audit.py audit \
+  --skills-root ~/.codex/skills \
+  --skills-root ~/.codex/plugins/cache \
+  --include-system \
+  --markdown-out skill-audit-report.md \
+  --json-out skill-audit-report.json
+```
 
-- `local_score`: 本地 10 分主分，核心看 usage / overlap / impact
-- `confidence_score`: 证据扎实程度
-- `community_prior_score`: 离线社区先验，独立输出
-- `risk_level`: 执行面风险，只看脚本和资源文件
-- `action`: 最后建议动作
+## Example Output
 
-`history` 只是弱证据。原生日志最稳，历史对话只适合补位。
+| Skill | Score | Action | Why |
+| --- | ---: | --- | --- |
+| `gmail` | 9.6 | `keep` | recent use, unique API capability |
+| `frontend-skill@user` | 4.8 | `merge-or-review` | overlaps with plugin copy |
+| `old-tone-helper` | 2.8 | `delete` | no recent use, high overlap, no ablation gain |
+| `shell-installer` | 6.4 | `quarantine-review` | useful, but high-risk execution pattern |
 
-## Reading The Report
+The Markdown report is for humans. The JSON report is for automation and keeps the same evidence in machine-readable form.
 
-- `local_score`: main 10-point local score
-- `confidence_score`: how strong the evidence is
-- `community_prior_score`: optional offline registry signal
-- `risk_level`: execution-surface risk from scripts and runnable resources
-- `action`: keep, review, merge-delete, or quarantine-review
+## How To Read The Report
 
-Native usage logs are stronger than transcript mentions. History fallback is there for partial evidence, not for final truth.
+- `local_score`: the 10-point usefulness score from usage, uniqueness, and impact.
+- `confidence_score`: how much evidence backs the score.
+- `report_mode`: `strong-evidence`, `partial-evidence`, or `structure-only`.
+- `score_breakdown`: per-skill explanation of each score component.
+- `risk_level`: execution-surface risk from scripts and runnable resources.
+- `community_prior_score`: optional registry signal for review priority and replacement checks.
 
-## 输入数据
+Actions are conservative. Low-confidence skills usually go to `observe-30d`. High-risk skills go to `quarantine-review` even when they score well locally.
 
-支持这些输入：
+## Inputs
 
-- `usage`: JSON、JSONL、CSV、TSV，支持 `calls / recent_30d_calls / recent_90d_calls / last_used_at / active_days`
-- `history`: 纯文本、JSON、JSONL，对话正文会过滤宿主注入提示
-- `ablation`: JSON、JSONL，支持 `cases / results / items / data`
-- `community`: JSON、JSONL、CSV、TSV，适合离线导出的 registry 指标
+The tool works with no extra files, but direct evidence gives better results.
 
-同名 skill 会优先按 `path / namespace / source` 解析。只给名字、又遇到重名时，这份证据会保守处理。
-输入文件路径写错时，CLI 会直接在 stderr 打 warning。
+| Input | Formats | Useful Fields |
+| --- | --- | --- |
+| `--usage-file` | JSON, JSONL, CSV, TSV | `calls`, `recent_30d_calls`, `recent_90d_calls`, `last_used_at`, `active_days`, `path`, `namespace` |
+| `--history-file` | text, JSON, JSONL | transcript text used as weak fallback evidence |
+| `--ablation-file` | JSON, JSONL | skill-on versus skill-off cases |
+| `--community-file` | JSON, JSONL, CSV, TSV | `rating`, `downloads`, `installs_current`, `installs_all_time`, `trending_7d`, `stars`, `comments_count`, `last_updated` |
 
-## Input Formats
+Duplicate skill names resolve through `path`, `namespace`, and `source`. If an input file only provides a name and that name appears in several installed roots, the report keeps the evidence conservative and adds an `evidence_note`.
 
-Supported inputs:
+## What It Checks
 
-- `usage`: JSON, JSONL, CSV, TSV
-- `history`: plain text, JSON, JSONL
-- `ablation`: JSON, JSONL
-- `community`: JSON, JSONL, CSV, TSV
+- Usage: recent calls, all-time calls, active days, last-used date, and evidence source.
+- Overlap: the closest installed peer by instruction and resource fingerprint.
+- Impact: ablation result for general skills; protected-capability scoring for API and tool skills.
+- Risk: shell execution, network download, persistence hooks, protected path access, dynamic execution, and similar patterns.
+- Community: optional offline registry signals kept separate from local usefulness.
 
-Duplicate skill names resolve through `path`, `namespace`, and `source` before falling back to name-only matching.
-Missing input files print a warning to stderr so bad paths are visible immediately.
+## 中文说明
 
-## 本地开发检查
+这个 skill 用来清理已经装多了的 agent skills。它会把每个 skill 的使用情况、功能重复、消融收益、风险信号、证据置信度放进一份报告，并给出 `keep / review / merge-delete / quarantine-review` 建议。
+
+最推荐的用法是先接入真实 usage 数据，再补 ablation 数据。只有历史对话时也能跑，但报告会标成较低置信度。
+
+## Development
 
 ```bash
 python scripts/sync_bundle.py
@@ -96,42 +87,16 @@ python codex-skill/scripts/skill_usefulness_audit.py audit \
   --json-out test-output/report.json
 ```
 
-## Local Dev Check
+## Repository Layout
 
-```bash
-python scripts/sync_bundle.py
-git diff --exit-code -- skill/
-python -m unittest discover -s tests -v
-python codex-skill/scripts/skill_usefulness_audit.py audit \
-  --skills-root codex-skill \
-  --markdown-out test-output/report.md \
-  --json-out test-output/report.json
-```
-
-## 目录
-
-- `codex-skill/`: 运行时 skill 源文件
-- `skill/`: ClawHub 发布包，保持和运行时代码同步入库
-- `tests/`: 兼容性和回归测试
-- `scripts/sync_bundle.py`: 从 `codex-skill/` 同步生成 `skill/`
-
-## Layout
-
-- `codex-skill/`: runtime skill source
-- `skill/`: ClawHub publish bundle kept in sync with the runtime source
-- `tests/`: regression and compatibility tests
-- `scripts/sync_bundle.py`: sync `codex-skill/` into `skill/`
-
-## 发布
-
-```bash
-python scripts/sync_bundle.py
-clawhub publish ./skill --slug skill-usefulness-audit --name "skill-usefulness-audit" --version 0.2.4 --tags latest,audit,skills --changelog "Use lifetime community signals, improve history fallback recall, remove redundant risk reads, and validate bundle drift in CI"
-```
+- `codex-skill/`: runtime skill source.
+- `skill/`: ClawHub publish bundle kept in sync with the runtime source.
+- `tests/`: regression and compatibility tests.
+- `scripts/sync_bundle.py`: syncs `codex-skill/` into `skill/`.
 
 ## Publish
 
 ```bash
 python scripts/sync_bundle.py
-clawhub publish ./skill --slug skill-usefulness-audit --name "skill-usefulness-audit" --version 0.2.4 --tags latest,audit,skills --changelog "Use lifetime community signals, improve history fallback recall, remove redundant risk reads, and validate bundle drift in CI"
+clawhub publish ./skill --slug skill-usefulness-audit --name "skill-usefulness-audit" --version 0.2.5 --tags latest,audit,skills --changelog "Improve README positioning, shorten ClawHub summary, and add score/report breakdowns"
 ```

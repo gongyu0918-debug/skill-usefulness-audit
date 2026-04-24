@@ -1,8 +1,8 @@
 ---
 name: skill-usefulness-audit
 slug: skill-usefulness-audit
-description: Audit whether installed skills still create real value. 审计已安装 skill 是否还有真实价值。Use only when the user explicitly asks to review, score, rank, consolidate, or delete installed skills across Codex, OpenClaw, Claude Code, or similar agent hosts. 当用户明确要求审查、评分、排序、合并或删除已安装 skill 时使用。This skill checks usage evidence, loads installed skill instructions, detects functional overlap, runs ablation on history for non-API and non-tool skills, scans risk signals, accepts optional offline registry metrics, then outputs a 10-point local score table, evidence, and action recommendations. 它会检查使用证据、读取已装 skill 说明、识别功能重叠、对非 API 与非工具型 skill 跑历史消融、扫描风险信号，并可读取离线社区指标，最后输出 10 分制本地评分表、判定依据和动作建议。
-version: 0.2.4
+description: Finds unused, overlapping, risky, or under-evidenced agent skills and produces a cleanup report.
+version: 0.2.5
 tags: [audit, skills, ablation, codex, openclaw]
 homepage: https://github.com/gongyu0918-debug/skill-usefulness-audit
 ---
@@ -79,6 +79,7 @@ Examples: Excel, DOCX, PDF, browser automation, deployment, OCR, external API wr
    Read `references/scoring-rubric.md`.
 10. Produce the final report as tables.
    Include a full ranking table, a recommended-actions table, a delete-candidate table, and a short evidence note for each skill.
+   Include `report_mode`, `score_breakdown`, and `community_breakdown` in JSON output.
 
 ## Ablation Rules
 
@@ -130,6 +131,12 @@ Always return these tables:
 3. Deletion or merge candidates with:
    `skill`, `total`, `kind`, `action`, `trigger`, `reason`
 4. Missing-evidence table when usage, ablation, or optional community data is incomplete.
+
+Always include these JSON fields:
+
+- `report_mode`: `strong-evidence`, `partial-evidence`, or `structure-only`.
+- `score_breakdown`: per-skill usage, uniqueness, impact, community, risk, and confidence details.
+- `community_breakdown`: registry signal components when community data is present.
 
 Keep deletion advice conservative for system or host-core skills.
 Recommend narrowing or merging before deletion when two high-overlap skills still serve distinct host integrations.

@@ -1312,43 +1312,56 @@ def load_community(paths: list[Path]) -> dict[str, dict[str, object]]:
     return community
 
 
-def community_prior_score(entry: dict[str, object] | None) -> tuple[float | None, float | None]:
+def community_prior_score(entry: dict[str, object] | None) -> tuple[float | None, float | None, dict[str, float]]:
     if not entry:
-        return None, None
+        return None, None, {}
 
     score = 0.0
     confidence = 0.0
+    breakdown: dict[str, float] = {}
     rating = coerce_float(entry.get("rating"))
     if rating is not None:
-        score += clamp(rating / 5.0, 0.0, 1.0) * 0.30
+        component = clamp(rating / 5.0, 0.0, 1.0) * 0.30
+        score += component
         confidence += 0.15
+        breakdown["rating"] = round(component, 3)
 
     volume = coerce_int(entry.get("installs_current"))
     if volume is None:
         volume = coerce_int(entry.get("downloads"))
     if volume is not None:
-        score += clamp(math.log1p(volume) / math.log1p(5000), 0.0, 1.0) * 0.20
+        component = clamp(math.log1p(volume) / math.log1p(5000), 0.0, 1.0) * 0.20
+        score += component
         confidence += 0.15
+        breakdown["current_installs_or_downloads"] = round(component, 3)
 
     installs_all_time = coerce_int(entry.get("installs_all_time"))
     if installs_all_time is not None:
-        score += clamp(math.log1p(installs_all_time) / math.log1p(20000), 0.0, 1.0) * 0.10
+        component = clamp(math.log1p(installs_all_time) / math.log1p(20000), 0.0, 1.0) * 0.10
+        score += component
         confidence += 0.10
+        breakdown["installs_all_time"] = round(component, 3)
 
     trending = coerce_int(entry.get("trending_7d"))
     if trending is not None:
-        score += clamp(math.log1p(trending) / math.log1p(250), 0.0, 1.0) * 0.15
+        component = clamp(math.log1p(trending) / math.log1p(250), 0.0, 1.0) * 0.15
+        score += component
         confidence += 0.15
+        breakdown["trending_7d"] = round(component, 3)
 
     stars = coerce_int(entry.get("stars"))
     if stars is not None:
-        score += clamp(math.log1p(stars) / math.log1p(250), 0.0, 1.0) * 0.10
+        component = clamp(math.log1p(stars) / math.log1p(250), 0.0, 1.0) * 0.10
+        score += component
         confidence += 0.10
+        breakdown["stars"] = round(component, 3)
 
     comments_count = coerce_int(entry.get("comments_count"))
     if comments_count is not None:
-        score += clamp(math.log1p(comments_count) / math.log1p(100), 0.0, 1.0) * 0.05
+        component = clamp(math.log1p(comments_count) / math.log1p(100), 0.0, 1.0) * 0.05
+        score += component
         confidence += 0.10
+        breakdown["comments_count"] = round(component, 3)
 
     last_updated_days = days_since(entry.get("last_updated"))
     if last_updated_days is not None:
@@ -1360,10 +1373,12 @@ def community_prior_score(entry: dict[str, object] | None) -> tuple[float | None
             maintenance = 0.4
         else:
             maintenance = 0.1
-        score += maintenance * 0.10
+        component = maintenance * 0.10
+        score += component
         confidence += 0.15
+        breakdown["maintenance"] = round(component, 3)
 
-    return round(clamp(score, 0.0, 1.0), 2), round(clamp(confidence, 0.0, 1.0), 2)
+    return round(clamp(score, 0.0, 1.0), 2), round(clamp(confidence, 0.0, 1.0), 2), breakdown
 
 
 def scan_risk(root: Path, self_relative_path: Path | None = None) -> dict[str, object]:
@@ -1783,6 +1798,36 @@ def fmt_optional_float(value, digits: int = 2) -> str:
     return "-" if coerced is None else f"{coerced:.{digits}f}"
 
 
+def fmt_breakdown_components(breakdown: dict[str, float]) -> str:
+    if not breakdown:
+        return "-"
+    order = [
+        "rating",
+        "current_installs_or_downloads",
+        "installs_all_time",
+        "trending_7d",
+        "stars",
+        "comments_count",
+        "maintenance",
+    ]
+    ordered_keys = [key for key in order if key in breakdown]
+    ordered_keys.extend(sorted(key for key in breakdown if key not in set(order)))
+    return ", ".join(f"{key}={breakdown[key]:.3f}" for key in ordered_keys)
+
+
+def determine_report_mode(
+    usage_paths: list[Path],
+    history_paths: list[Path],
+    ablation_paths: list[Path],
+    results: list[dict[str, object]],
+) -> str:
+    if not usage_paths and not history_paths and not ablation_paths:
+        return "structure-only"
+    if any(item["missing_usage"] or item["missing_ablation"] for item in results):
+        return "partial-evidence"
+    return "strong-evidence"
+
+
 def existing_paths(label: str, raw_paths: list[str] | None) -> list[Path]:
     paths = [Path(item).expanduser().resolve() for item in (raw_paths or [])]
     existing: list[Path] = []
@@ -1849,7 +1894,7 @@ def run_audit(args: argparse.Namespace) -> int:
         community_entry, community_note = resolve_record(community, skill, alias_counts)
         if community_note:
             evidence_notes.append(f"community={community_note}")
-        community_prior, community_conf = community_prior_score(community_entry)
+        community_prior, community_conf, community_breakdown = community_prior_score(community_entry)
         evidence_note = " | ".join(dict.fromkeys(evidence_notes)) if evidence_notes else None
 
         u_score = usage_score(usage_record, evidence_weight)
@@ -1874,6 +1919,41 @@ def run_audit(args: argparse.Namespace) -> int:
             best_overlap,
             community_prior,
         )
+        score_breakdown = {
+            "usage": {
+                "score": u_score,
+                "source": usage_source,
+                "evidence_weight": evidence_weight,
+                "calls": calls,
+                "recent_30d_calls": coerce_int(usage_record.get("recent_30d_calls")),
+                "recent_90d_calls": coerce_int(usage_record.get("recent_90d_calls")),
+                "last_used_at": usage_record.get("last_used_at"),
+            },
+            "uniqueness": {
+                "score": uniq_score,
+                "overlap_peer": best_peer,
+                "overlap_value": round(best_overlap, 2),
+            },
+            "impact": {
+                "score": i_score,
+                "kind": kind,
+                "protected_capability": kind in {"api", "tool"},
+                "ablation": ablation_summary,
+            },
+            "community": {
+                "score": community_prior,
+                "confidence": community_conf,
+                "breakdown": community_breakdown,
+            },
+            "risk": {
+                "level": skill["risk_level"],
+                "score": skill["risk_score"],
+                "flags": skill["risk_flags"],
+            },
+            "confidence": {
+                "score": confidence,
+            },
+        }
 
         results.append(
             {
@@ -1908,10 +1988,12 @@ def run_audit(args: argparse.Namespace) -> int:
                 "community": community_entry,
                 "community_prior_score": community_prior,
                 "community_confidence": community_conf,
+                "community_breakdown": community_breakdown,
                 "risk_level": skill["risk_level"],
                 "risk_score": skill["risk_score"],
                 "risk_flags": skill["risk_flags"],
                 "risk_evidence": skill["risk_evidence"],
+                "score_breakdown": score_breakdown,
                 "evidence_note": evidence_note,
                 "basis": build_basis(
                     usage_record,
@@ -1941,6 +2023,7 @@ def run_audit(args: argparse.Namespace) -> int:
         key=lambda item: (float(item["local_score"]), str(item["display_name"])),
     )
     missing = [item for item in ranked if item["missing_usage"] or item["missing_ablation"] or item["missing_community"]]
+    report_mode = determine_report_mode(usage_paths, history_paths, ablation_paths, ranked)
 
     score_rows = []
     for index, item in enumerate(ranked, start=1):
@@ -1973,6 +2056,7 @@ def run_audit(args: argparse.Namespace) -> int:
         f"- History files: {len(history_paths)}",
         f"- Ablation files: {len(ablation_paths)}",
         f"- Community files: {len(community_paths)}",
+        f"- Report mode: {report_mode}",
         f"- Recommended actions: {len(recommended_actions)}",
         f"- Delete candidates: {len(delete_candidates)}",
         "",
@@ -2000,6 +2084,29 @@ def run_audit(args: argparse.Namespace) -> int:
             score_rows,
         ),
     ]
+
+    community_rows = []
+    for item in ranked:
+        community_breakdown = item["community_breakdown"]
+        if community_breakdown:
+            community_rows.append(
+                [
+                    str(item["display_name"]),
+                    fmt_optional_float(item["community_prior_score"]),
+                    fmt_optional_float(item["community_confidence"]),
+                    fmt_breakdown_components(community_breakdown),
+                ]
+            )
+
+    if community_rows:
+        report_parts.extend(
+            [
+                "",
+                "## Community Signal Breakdown",
+                "",
+                markdown_table(["Skill", "Comm", "Confidence", "Components"], community_rows),
+            ]
+        )
 
     if recommended_actions:
         action_rows = [
@@ -2079,6 +2186,7 @@ def run_audit(args: argparse.Namespace) -> int:
             "history_files": len(history_paths),
             "ablation_files": len(ablation_paths),
             "community_files": len(community_paths),
+            "report_mode": report_mode,
             "recommended_actions": len(recommended_actions),
             "delete_candidates": len(delete_candidates),
             "results": ranked,

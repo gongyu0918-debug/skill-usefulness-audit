@@ -141,13 +141,17 @@ Treat community data as external prior, not a local verdict.
 
 Weighted components:
 
-- `0.35`: normalized rating
-- `0.25`: current installs or downloads
-- `0.20`: trending metric
+- `0.30`: normalized rating
+- `0.20`: current installs or downloads
+- `0.10`: all-time installs
+- `0.15`: trending metric
 - `0.10`: stars
+- `0.05`: comments
 - `0.10`: maintenance freshness from `last_updated`
 
 Use it to rank review priority and benchmark replacements.
+
+Emit `community_breakdown` in JSON so users can see which registry signals contributed.
 
 ## 6. Risk Level
 
