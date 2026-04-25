@@ -1,6 +1,6 @@
 # Ablation Protocol
 
-Use this protocol for every `general` skill.
+Use this protocol for `general` skills selected by the ablation plan.
 
 ## Goal
 
@@ -8,15 +8,40 @@ Measure whether the skill changes outcomes in a meaningful way.
 
 High consistency between skill-on and skill-off runs means the skill adds little value.
 
+## Cost-Efficient Triage
+
+Generate a plan before running replay:
+
+```bash
+python scripts/skill_usefulness_audit.py audit \
+  --skills-root ./skills \
+  --usage-file ./usage.json \
+  --json-out ./skill-audit-report.json \
+  --ablation-plan-out ./skill-ablation-plan.json
+```
+
+The plan uses local evidence first:
+
+- final score
+- overlap
+- quality burden
+- activation volume
+- evidence confidence
+- missing or weak prior ablation
+
+It then estimates model cost against a 10-case full protocol and writes an early-stop plan.
+
 ## Sampling
 
-Pick `5-20` historical tasks per skill.
+Start with `3` historical tasks per candidate skill.
 Choose tasks where the skill should plausibly matter.
 Prefer real user turns over synthetic prompts.
+Expand to `5` cases when the first batch is mixed.
+Expand to `10` cases only for high-impact or deletion-boundary decisions.
 
 ## Replay Method
 
-For each case, run two isolated replays:
+For each selected case, run two isolated replays:
 
 1. `with_skill`
 2. `without_skill`
@@ -29,7 +54,17 @@ Keep these constant:
 - same tool permissions
 - same success criteria
 
-Use a fresh thread, subagent, or isolated run if the host supports it.
+Use a fresh thread or isolated run if the host supports it.
+Subagents are optional. They improve isolation and parallelism, but they increase total model spend when every branch runs full replay.
+
+## Judge Method
+
+Use pairwise comparison when judging open-ended outputs:
+
+1. Compare `with_skill` and `without_skill` side by side.
+2. Randomize A/B order.
+3. Spot-check reversed order on boundary cases.
+4. Prefer `pass/fail`, `same/better/worse`, and short reasons over long open-ended grading.
 
 ## Case Judgment
 
@@ -69,6 +104,24 @@ Record:
 Use `same` when the final answer, correctness, and workflow remain materially equivalent.
 Use `better` when the skill improves correctness, speed, structure, or user-fit in a way the baseline did not.
 Use `worse` when the skill adds friction, drift, or errors.
+
+## Early Stop Rules
+
+- Stop as low-value when `3/3` cases are `same` and `better_rate` is `0`.
+- Stop as useful when at least `2/3` cases are `better` and no case is `worse`.
+- Expand to `5` when the first batch is mixed.
+- Expand to `10` only for delete-boundary or high-impact decisions.
+
+## Model Cost
+
+The audit script does not call an LLM during planning.
+The plan estimates replay cost with three profiles:
+
+- `light`: about `6.2k` model-cost units per case
+- `realistic`: about `24k` model-cost units per case
+- `coding`: about `50k` model-cost units per case
+
+Each case assumes two replays plus one compact pairwise judge.
 
 ## Reporting
 

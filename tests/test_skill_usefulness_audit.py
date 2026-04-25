@@ -433,6 +433,111 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
         self.assertIn("installs_all_time=", report)
         self.assertIn("comments_count=", report)
 
+    def test_static_quality_burden_flags_bloated_resources_and_private_artifacts(self) -> None:
+        skills_root = self.tempdir / "skills"
+        skill_dir = write_skill(
+            skills_root,
+            "bloated-helper",
+            "Use for any task, every request, and general purpose support.",
+            extra_body="\n".join(["Detailed instructions that repeat context."] * 900),
+        )
+        for index in range(20):
+            (skill_dir / "references" / f"topic-{index}.md").write_text("reference notes\n", encoding="utf-8")
+        assets_dir = skill_dir / "assets"
+        assets_dir.mkdir()
+        (assets_dir / ".env.prod").write_text("PRIVATE=1\n", encoding="utf-8")
+        (assets_dir / "installer.exe").write_bytes(b"MZ")
+
+        payload = self.run_audit_json("--skills-root", str(skills_root))
+
+        item = self.first_result(payload, "bloated-helper")
+        self.assertGreater(item["quality_penalty"], 0.0)
+        self.assertLess(item["final_score"], item["local_score"])
+        self.assertIn("prompt-bloat", item["quality_flags"])
+        self.assertIn("broad-trigger-surface", item["quality_flags"])
+        self.assertIn("reference-bloat", item["quality_flags"])
+        self.assertIn("private-bundle-artifact", item["quality_flags"])
+        self.assertIn("executable-asset", item["quality_flags"])
+        self.assertEqual(item["resource_metrics"]["assets_count"], 2)
+
+    def test_static_quality_burden_flags_disclosure_gap_vague_names_and_bad_python(self) -> None:
+        skills_root = self.tempdir / "skills"
+        skill_dir = write_skill(
+            skills_root,
+            "messy-helper",
+            "Use for focused messy skill checks.",
+            extra_body="Load only the right reference when needed.",
+        )
+        long_reference = "\n".join(f"line {index}" for index in range(120))
+        for index in range(5):
+            (skill_dir / "references" / f"file{index}.md").write_text(long_reference, encoding="utf-8")
+        (skill_dir / "scripts" / "broken.py").write_text("def broken(:\n    pass\n", encoding="utf-8")
+
+        payload = self.run_audit_json("--skills-root", str(skills_root))
+
+        item = self.first_result(payload, "messy-helper")
+        self.assertGreater(item["quality_penalty"], 0.0)
+        self.assertIn("reference-disclosure-gap", item["quality_flags"])
+        self.assertIn("long-reference-without-toc", item["quality_flags"])
+        self.assertIn("vague-resource-names", item["quality_flags"])
+        self.assertIn("script-syntax-error", item["quality_flags"])
+
+    def test_runtime_quality_burden_flags_overtrigger_and_repair_cost(self) -> None:
+        skills_root = self.tempdir / "skills"
+        write_skill(skills_root, "overtrigger-helper", "Rewrite prompts for clearer task execution.")
+
+        usage_path = self.tempdir / "usage.json"
+        usage_path.write_text(
+            json.dumps(
+                [
+                    {
+                        "name": "overtrigger-helper",
+                        "calls": 12,
+                        "executions": 1,
+                        "false_triggers": 4,
+                        "reference_loads": 40,
+                        "script_failures": 4,
+                        "repair_turns": 3,
+                    }
+                ]
+            ),
+            encoding="utf-8",
+        )
+        ablation_path = self.tempdir / "ablation.json"
+        ablation_path.write_text(
+            json.dumps(
+                [
+                    {
+                        "skill": "overtrigger-helper",
+                        "with_skill": {"pass": True, "score": 0.8},
+                        "without_skill": {"pass": True, "score": 0.8},
+                        "verdict": "same",
+                    }
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        payload = self.run_audit_json(
+            "--skills-root",
+            str(skills_root),
+            "--usage-file",
+            str(usage_path),
+            "--ablation-file",
+            str(ablation_path),
+        )
+
+        item = self.first_result(payload, "overtrigger-helper")
+        self.assertEqual(item["executions"], 1)
+        self.assertGreaterEqual(item["quality_penalty"], 1.5)
+        self.assertLess(item["final_score"], item["local_score"])
+        self.assertIn("overtrigger-low-execution", item["quality_flags"])
+        self.assertIn("overtrigger-no-impact", item["quality_flags"])
+        self.assertIn("reference-overload", item["quality_flags"])
+        self.assertIn("script-failure-burden", item["quality_flags"])
+        self.assertIn("agent-repair-burden", item["quality_flags"])
+        self.assertIn("quality", item["score_breakdown"])
+
     def test_risk_scan_flags_high_risk_skill(self) -> None:
         skills_root = self.tempdir / "skills"
         skill_dir = write_skill(skills_root, "network-installer", "Install helpers by downloading scripts.")
@@ -628,21 +733,34 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
             "# skill-usefulness-audit\r\n"
         )
 
-        bundled = SYNC_MODULE.bundle_frontmatter(source_text, "0.2.5")
+        bundled = SYNC_MODULE.bundle_frontmatter(source_text, "0.2.6")
 
         self.assertIn("description: Audit installed skills.", bundled)
-        self.assertIn("version: 0.2.5", bundled)
+        self.assertIn("version: 0.2.6", bundled)
         self.assertIn("# skill-usefulness-audit", bundled)
 
     def test_sync_bundle_writes_publish_manifest(self) -> None:
-        subprocess.run([sys.executable, str(SYNC_SCRIPT)], cwd=REPO_ROOT, check=True, text=True, capture_output=True)
-        bundle_skill = (REPO_ROOT / "skill" / "SKILL.md").read_text(encoding="utf-8")
-        source_script = (REPO_ROOT / "codex-skill" / "scripts" / "skill_usefulness_audit.py").read_text(encoding="utf-8")
-        bundle_script = (REPO_ROOT / "skill" / "scripts" / "skill_usefulness_audit.py").read_text(encoding="utf-8")
+        isolated_repo = self.tempdir / "repo"
+        shutil.copytree(REPO_ROOT / "codex-skill", isolated_repo / "codex-skill", ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+        (isolated_repo / "scripts").mkdir()
+        shutil.copy2(SYNC_SCRIPT, isolated_repo / "scripts" / "sync_bundle.py")
+        shutil.copy2(REPO_ROOT / "VERSION", isolated_repo / "VERSION")
+
+        subprocess.run(
+            [sys.executable, str(isolated_repo / "scripts" / "sync_bundle.py")],
+            cwd=isolated_repo,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+
+        bundle_skill = (isolated_repo / "skill" / "SKILL.md").read_text(encoding="utf-8")
+        source_script = (isolated_repo / "codex-skill" / "scripts" / "skill_usefulness_audit.py").read_text(encoding="utf-8")
+        bundle_script = (isolated_repo / "skill" / "scripts" / "skill_usefulness_audit.py").read_text(encoding="utf-8")
         self.assertIn("slug: skill-usefulness-audit", bundle_skill)
-        self.assertIn("version: 0.2.5", bundle_skill)
+        self.assertIn("version: 0.2.6", bundle_skill)
         self.assertIn("Finds unused, overlapping, risky, or under-evidenced agent skills", bundle_skill)
-        self.assertFalse((REPO_ROOT / "skill" / "scripts" / "__pycache__").exists())
+        self.assertFalse((isolated_repo / "skill" / "scripts" / "__pycache__").exists())
         self.assertEqual(bundle_script, source_script)
 
     def test_markdown_table_escapes_headers(self) -> None:
@@ -669,6 +787,52 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
         self.assertIn("score_breakdown", item)
         self.assertEqual(item["score_breakdown"]["usage"]["calls"], 3)
         self.assertIn("community", item["score_breakdown"])
+        self.assertIn("quality", item["score_breakdown"])
+        self.assertEqual(item["final_score"], item["local_score"])
+
+    def test_ablation_plan_prioritizes_candidates_and_estimates_cost_savings(self) -> None:
+        skills_root = self.tempdir / "skills"
+        write_skill(skills_root, "tone-polisher", "Rewrite text with polished tone and softer phrasing.")
+        write_skill(skills_root, "tone-helper", "Rewrite text with polished tone and softer phrasing.")
+        write_skill(skills_root, "overtrigger-helper", "Rewrite prompts for clearer task execution.")
+        write_skill(skills_root, "solid-helper", "Structure project notes into clean summaries.")
+
+        usage_path = self.tempdir / "usage.json"
+        usage_path.write_text(
+            json.dumps(
+                [
+                    {"name": "overtrigger-helper", "calls": 12, "executions": 1, "false_triggers": 4},
+                    {"name": "solid-helper", "calls": 10, "recent_30d_calls": 8},
+                ]
+            ),
+            encoding="utf-8",
+        )
+        plan_out = self.tempdir / "ablation-plan.json"
+
+        payload = self.run_audit_json(
+            "--skills-root",
+            str(skills_root),
+            "--usage-file",
+            str(usage_path),
+            "--ablation-plan-out",
+            str(plan_out),
+            "--ablation-plan-max-candidates",
+            "3",
+        )
+        plan = json.loads(plan_out.read_text(encoding="utf-8"))
+
+        self.assertIn("ablation_plan", payload)
+        self.assertEqual(plan["strategy"], "triage-pairwise-early-stop")
+        self.assertEqual(plan["candidate_skills"], 3)
+        self.assertEqual(plan["case_policy"]["initial_cases_per_candidate"], 3)
+        self.assertGreater(
+            plan["model_cost_estimates"]["planned_expected"]["reduction_vs_baseline_percent"]["realistic"],
+            0,
+        )
+        candidate_names = {item["skill"] for item in plan["candidates"]}
+        self.assertIn("tone-polisher", candidate_names)
+        self.assertIn("overtrigger-helper", candidate_names)
+        self.assertEqual(plan["accuracy_tradeoff"]["expected_accuracy_impact"], "low")
 
     def test_structure_only_report_mode_without_evidence_files(self) -> None:
         skills_root = self.tempdir / "skills"

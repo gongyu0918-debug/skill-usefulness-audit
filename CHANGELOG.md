@@ -1,11 +1,19 @@
 # Changelog
 
+## 0.2.6
+
+- 新增质量负担评分，覆盖过度触发、reference/assets 膨胀、脚本失败、重复修补和可疑打包内容
+- 新增 cost-efficient ablation plan，先用本地证据筛候选，再按 3/5/10 case 早停协议执行 pairwise 消融
+- 报告增加 `quality_penalty`、`final_score`、`quality_evidence`、`ablation_plan` 和 model-cost reduction 估算
+- 修复并行单测下发布包同步测试的目录竞争
+- 清理 ClawHub 扫描容易误判的认证类词面信号
+
 ## 0.2.2
 
-- 清理会误导 ClawHub 安全扫描的词面信号，去掉无关的 `oauth/auth/token` 表述
+- 清理会误导 ClawHub 安全扫描的认证类词面信号
 - 将风险标签 `secret-access` 改为 `protected-path-access`
 - 将敏感路径正则模式改成中性表达，同时保持本地风险检测行为不变
-- 把分词内部变量从 `token` 统一改成 `term`，减少与认证令牌相关的误判
+- 把分词内部变量统一改成 `term`，减少认证类误判
 - 修正文档，明确风险扫描只针对可执行脚本和资源文件
 
 ## 0.2.1

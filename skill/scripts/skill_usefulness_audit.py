@@ -6,6 +6,7 @@ Audit installed skills by usage, overlap, impact, confidence, and risk.
 from __future__ import annotations
 
 import argparse
+import ast
 import csv
 import json
 import math
@@ -218,6 +219,56 @@ ACTIVE_DAYS_KEYS = (
     "使用天数",
 )
 
+EXECUTION_COUNT_KEYS = (
+    "executions",
+    "actual_runs",
+    "script_runs",
+    "tool_executions",
+    "执行次数",
+    "实际执行次数",
+    "脚本执行次数",
+)
+
+SCRIPT_FAILURE_KEYS = (
+    "script_failures",
+    "execution_failures",
+    "failure_count",
+    "error_count",
+    "脚本失败次数",
+    "执行失败次数",
+    "错误次数",
+)
+
+REPAIR_TURN_KEYS = (
+    "repair_turns",
+    "fix_turns",
+    "debug_turns",
+    "manual_fixes",
+    "修复轮数",
+    "调试轮数",
+    "擦屁股轮数",
+)
+
+REFERENCE_LOAD_KEYS = (
+    "reference_loads",
+    "references_loaded",
+    "reference_reads",
+    "context_loads",
+    "reference_files_read",
+    "引用加载次数",
+    "参考加载次数",
+    "上下文加载次数",
+)
+
+FALSE_TRIGGER_KEYS = (
+    "false_triggers",
+    "misfires",
+    "accidental_triggers",
+    "wrong_triggers",
+    "误触发次数",
+    "错误触发次数",
+)
+
 COLLECTION_KEYS = {
     "skills",
     "items",
@@ -363,6 +414,18 @@ RISK_SCAN_DIRS = {"scripts", "resources", "bin", "hooks"}
 
 MAX_SCAN_BYTES = 512 * 1024
 HISTORY_EVIDENCE_WEIGHT = 0.45
+TEXT_BYTES_PER_CONTEXT_UNIT = 4
+ABLATION_BASELINE_CASES = 10
+ABLATION_INITIAL_CASES = 3
+ABLATION_EXPAND_CASES = 5
+ABLATION_MAX_CASES = 10
+ABLATION_MIN_CANDIDATES = 3
+ABLATION_DEFAULT_MAX_CANDIDATES = 8
+ABLATION_COST_PROFILES = {
+    "light": 6200,
+    "realistic": 24000,
+    "coding": 50000,
+}
 ALLOWED_HISTORY_ROLES = {"user", "assistant"}
 HISTORY_SKIP_FIELDS = {
     "developer-instructions",
@@ -476,6 +539,63 @@ COMPILED_RISK_RULES = tuple(
     for rule in RISK_RULES
 )
 
+BROAD_TRIGGER_PATTERNS = tuple(
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        r"\balways\b",
+        r"\bany(?:thing| task| request)?\b",
+        r"\bevery(?:thing| task| request| time)?\b",
+        r"\bwhenever\b",
+        r"\ball tasks?\b",
+        r"\bgeneral purpose\b",
+        r"任何",
+        r"所有",
+        r"每次",
+        r"总是",
+        r"通用",
+        r"万能",
+    )
+)
+
+SCRIPT_BURDEN_PATTERNS = tuple(
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        r"\btodo\b",
+        r"\bfixme\b",
+        r"\bplaceholder\b",
+        r"\bnotimplementederror\b",
+        r"\bpass\s*(?:#|$)",
+        r"c:\\users\\",
+        r"/users/[^/\s]+/",
+        r"/home/[^/\s]+/",
+    )
+)
+
+VAGUE_RESOURCE_NAME_PATTERNS = tuple(
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        r"^(?:file|doc|document|data|tmp|temp|new|copy|backup|final|misc|stuff)[-_ ]?\d*$",
+        r"^(?:untitled|example|sample)[-_ ]?\d*$",
+        r"^(?:文件|文档|临时|备份|最终)[-_ ]?\d*$",
+    )
+)
+
+REFERENCE_TOC_MARKERS = ("table of contents", "[toc]", "## contents", "# contents", "目录")
+
+PRIVATE_BUNDLE_NAME_PATTERNS = tuple(
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        r"(^|[\\/])\.env(?:\.|$)",
+        r"(^|[\\/])id_rsa(?:\.|$)",
+        r"(^|[\\/])\.aws(?:[\\/]|$)",
+        r"(^|[\\/])\.ssh(?:[\\/]|$)",
+        r"(?:^|[\\/])secret(?:s)?(?:\.|[\\/]|$)",
+        r"\.(?:pem|pfx|p12|key)$",
+    )
+)
+
+EXECUTABLE_ASSET_SUFFIXES = {".bat", ".cmd", ".com", ".dll", ".dylib", ".exe", ".msi", ".scr", ".so"}
+
 
 def clamp(value: float, low: float, high: float) -> float:
     return max(low, min(high, value))
@@ -501,6 +621,25 @@ def normalize_pathish(value) -> str | None:
 
 def read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="replace")
+
+
+def estimate_context_units(text: str) -> int:
+    if not text:
+        return 0
+    return math.ceil(len(text) / TEXT_BYTES_PER_CONTEXT_UNIT)
+
+
+def file_size(path: Path) -> int:
+    try:
+        return path.stat().st_size
+    except OSError:
+        return 0
+
+
+def sorted_files(root: Path) -> list[Path]:
+    if not root.exists():
+        return []
+    return sorted((item for item in root.rglob("*") if item.is_file()), key=lambda item: item.as_posix())
 
 
 def parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
@@ -841,6 +980,11 @@ def empty_usage_record() -> dict[str, object]:
         "active_days": None,
         "first_seen_at": None,
         "last_used_at": None,
+        "executions": None,
+        "script_failures": None,
+        "repair_turns": None,
+        "reference_loads": None,
+        "false_triggers": None,
     }
 
 
@@ -897,6 +1041,11 @@ def usage_record_from_mapping(mapping: dict, hint_name: str | None = None) -> tu
     active_days = coerce_int(first_present(mapping, ACTIVE_DAYS_KEYS, lowered))
     first_seen_at = normalize_dateish(first_present(mapping, FIRST_SEEN_KEYS, lowered))
     last_used_at = normalize_dateish(first_present(mapping, LAST_USED_KEYS, lowered))
+    executions = coerce_int(first_present(mapping, EXECUTION_COUNT_KEYS, lowered))
+    script_failures = coerce_int(first_present(mapping, SCRIPT_FAILURE_KEYS, lowered))
+    repair_turns = coerce_int(first_present(mapping, REPAIR_TURN_KEYS, lowered))
+    reference_loads = coerce_int(first_present(mapping, REFERENCE_LOAD_KEYS, lowered))
+    false_triggers = coerce_int(first_present(mapping, FALSE_TRIGGER_KEYS, lowered))
 
     if calls is None and recent_90d_calls is not None:
         calls = recent_90d_calls
@@ -905,7 +1054,19 @@ def usage_record_from_mapping(mapping: dict, hint_name: str | None = None) -> tu
 
     has_any_field = any(
         value is not None
-        for value in (calls, recent_30d_calls, recent_90d_calls, active_days, first_seen_at, last_used_at)
+        for value in (
+            calls,
+            recent_30d_calls,
+            recent_90d_calls,
+            active_days,
+            first_seen_at,
+            last_used_at,
+            executions,
+            script_failures,
+            repair_turns,
+            reference_loads,
+            false_triggers,
+        )
     )
     if not has_any_field:
         return None
@@ -919,6 +1080,11 @@ def usage_record_from_mapping(mapping: dict, hint_name: str | None = None) -> tu
             "active_days": active_days,
             "first_seen_at": first_seen_at,
             "last_used_at": last_used_at,
+            "executions": executions,
+            "script_failures": script_failures,
+            "repair_turns": repair_turns,
+            "reference_loads": reference_loads,
+            "false_triggers": false_triggers,
         },
     )
 
@@ -948,6 +1114,11 @@ def merge_usage_record(store: dict[str, dict[str, object]], name: str, incoming:
         incoming.get("last_used_at"),  # type: ignore[arg-type]
         "max",
     )
+    for key in ("executions", "script_failures", "repair_turns", "reference_loads", "false_triggers"):
+        target[key] = sum_optional(
+            coerce_int(target.get(key)),
+            coerce_int(incoming.get(key)),
+        )
 
 
 def consume_usage_node(
@@ -1439,6 +1610,313 @@ def scan_risk(root: Path, self_relative_path: Path | None = None) -> dict[str, o
     }
 
 
+def relative_label(root: Path, path: Path) -> str:
+    try:
+        return path.resolve().relative_to(root.resolve()).as_posix()
+    except ValueError:
+        return path.as_posix()
+
+
+def text_units_for_files(files: list[Path]) -> int:
+    total = 0
+    for path in files:
+        if path.suffix.lower() not in TEXT_FILE_SUFFIXES:
+            continue
+        size = file_size(path)
+        if size > MAX_SCAN_BYTES:
+            total += math.ceil(size / TEXT_BYTES_PER_CONTEXT_UNIT)
+            continue
+        total += estimate_context_units(read_text(path))
+    return total
+
+
+def resource_metrics(root: Path, dirname: str) -> dict[str, object]:
+    files = sorted_files(root / dirname)
+    return {
+        "count": len(files),
+        "bytes": sum(file_size(path) for path in files),
+        "context_units": text_units_for_files(files),
+        "files": files,
+    }
+
+
+def quality_issue(
+    label: str,
+    penalty: float,
+    reason: str,
+    files: list[str] | None = None,
+    metrics: dict[str, object] | None = None,
+) -> dict[str, object]:
+    item: dict[str, object] = {
+        "label": label,
+        "penalty": round(penalty, 2),
+        "reason": reason,
+    }
+    if files:
+        item["files"] = files
+    if metrics:
+        item["metrics"] = metrics
+    return item
+
+
+def reference_is_directly_disclosed(body_lower: str, root: Path, path: Path) -> bool:
+    relative = relative_label(root, path).lower()
+    filename = path.name.lower()
+    stem = path.stem.lower()
+    return relative in body_lower or filename in body_lower or stem in body_lower
+
+
+def has_reference_toc(text: str) -> bool:
+    lowered = text.lower()
+    return any(marker in lowered for marker in REFERENCE_TOC_MARKERS)
+
+
+def vague_resource_files(root: Path, files: list[Path]) -> list[str]:
+    matches = []
+    for path in files:
+        stem = path.stem
+        if any(pattern.search(stem) for pattern in VAGUE_RESOURCE_NAME_PATTERNS):
+            matches.append(relative_label(root, path))
+    return matches
+
+
+def python_syntax_error_files(root: Path, files: list[Path]) -> list[str]:
+    matches = []
+    for path in files:
+        if path.suffix.lower() != ".py" or file_size(path) > MAX_SCAN_BYTES:
+            continue
+        try:
+            ast.parse(read_text(path), filename=str(path))
+        except SyntaxError:
+            matches.append(relative_label(root, path))
+    return matches
+
+
+def scan_static_quality(
+    root: Path,
+    description: str,
+    body: str,
+    script_files: list[Path],
+    reference_metrics: dict[str, object],
+    asset_metrics: dict[str, object],
+) -> dict[str, object]:
+    evidence: list[dict[str, object]] = []
+    skill_units = estimate_context_units(body)
+    description_units = estimate_context_units(description)
+    reference_count = int(reference_metrics["count"])
+    reference_units = int(reference_metrics["context_units"])
+    asset_count = int(asset_metrics["count"])
+    asset_bytes = int(asset_metrics["bytes"])
+    body_lower = body.lower()
+    reference_files = list(reference_metrics["files"])  # type: ignore[arg-type]
+    asset_files = list(asset_metrics["files"])  # type: ignore[arg-type]
+
+    if skill_units >= 5000:
+        evidence.append(
+            quality_issue(
+                "prompt-bloat",
+                0.40,
+                "SKILL.md body is large enough to pressure the shared context budget",
+                metrics={"skill_context_units": skill_units},
+            )
+        )
+    elif skill_units >= 2500:
+        evidence.append(
+            quality_issue(
+                "prompt-bloat",
+                0.20,
+                "SKILL.md body is moderately large",
+                metrics={"skill_context_units": skill_units},
+            )
+        )
+
+    broad_matches = [pattern.pattern for pattern in BROAD_TRIGGER_PATTERNS if pattern.search(description)]
+    if len(broad_matches) >= 2 or (broad_matches and description_units >= 30):
+        evidence.append(
+            quality_issue(
+                "broad-trigger-surface",
+                0.25,
+                "frontmatter description uses broad trigger language",
+                metrics={"description_context_units": description_units, "matches": broad_matches[:5]},
+            )
+        )
+
+    if reference_count >= 3:
+        linked_reference_count = sum(
+            1 for path in reference_files if reference_is_directly_disclosed(body_lower, root, path)
+        )
+        linked_rate = linked_reference_count / max(reference_count, 1)
+        if linked_reference_count == 0:
+            evidence.append(
+                quality_issue(
+                    "reference-disclosure-gap",
+                    0.30,
+                    "reference files are not directly discoverable from SKILL.md",
+                    metrics={"references_count": reference_count, "linked_reference_count": linked_reference_count},
+                )
+            )
+        elif reference_count >= 8 and linked_rate < 0.30:
+            evidence.append(
+                quality_issue(
+                    "reference-disclosure-gap",
+                    0.20,
+                    "few reference files are directly linked from SKILL.md",
+                    metrics={
+                        "references_count": reference_count,
+                        "linked_reference_count": linked_reference_count,
+                        "linked_reference_rate": round(linked_rate, 2),
+                    },
+                )
+            )
+
+    if reference_count >= 50 or reference_units >= 50000:
+        evidence.append(
+            quality_issue(
+                "reference-bloat",
+                0.50,
+                "references are large enough to encourage over-loading context",
+                metrics={"references_count": reference_count, "reference_context_units": reference_units},
+            )
+        )
+    elif reference_count >= 20 or reference_units >= 15000:
+        evidence.append(
+            quality_issue(
+                "reference-bloat",
+                0.25,
+                "references need review for progressive disclosure",
+                metrics={"references_count": reference_count, "reference_context_units": reference_units},
+            )
+        )
+
+    long_reference_without_toc = []
+    for path in reference_files:
+        if path.suffix.lower() not in TEXT_FILE_SUFFIXES or file_size(path) > MAX_SCAN_BYTES:
+            continue
+        text = read_text(path)
+        if len(text.splitlines()) > 100 and not has_reference_toc(text):
+            long_reference_without_toc.append(relative_label(root, path))
+    if long_reference_without_toc:
+        evidence.append(
+            quality_issue(
+                "long-reference-without-toc",
+                0.20 if len(long_reference_without_toc) >= 3 else 0.10,
+                "long reference files are missing a visible table of contents",
+                files=long_reference_without_toc[:8],
+                metrics={"matches": len(long_reference_without_toc)},
+            )
+        )
+
+    if asset_count >= 200 or asset_bytes >= 100 * 1024 * 1024:
+        evidence.append(
+            quality_issue(
+                "asset-bloat",
+                0.50,
+                "assets directory is large enough to look like a bundle dump",
+                metrics={"assets_count": asset_count, "asset_bytes": asset_bytes},
+            )
+        )
+    elif asset_count >= 50 or asset_bytes >= 25 * 1024 * 1024:
+        evidence.append(
+            quality_issue(
+                "asset-bloat",
+                0.25,
+                "assets directory is heavy for a skill bundle",
+                metrics={"assets_count": asset_count, "asset_bytes": asset_bytes},
+            )
+        )
+
+    vague_files = vague_resource_files(root, script_files + reference_files + asset_files)
+    if len(vague_files) >= 5:
+        evidence.append(
+            quality_issue(
+                "vague-resource-names",
+                0.20,
+                "resource filenames are too generic for reliable selective loading",
+                files=vague_files[:8],
+                metrics={"matches": len(vague_files)},
+            )
+        )
+
+    private_paths = [
+        relative_label(root, path)
+        for path in asset_files + reference_files
+        if any(pattern.search(relative_label(root, path)) for pattern in PRIVATE_BUNDLE_NAME_PATTERNS)
+    ]
+    if private_paths:
+        evidence.append(
+            quality_issue(
+                "private-bundle-artifact",
+                0.60,
+                "bundle contains files that look private or environment-specific",
+                files=private_paths[:8],
+                metrics={"matches": len(private_paths)},
+            )
+        )
+
+    executable_assets = [
+        relative_label(root, path)
+        for path in asset_files
+        if path.suffix.lower() in EXECUTABLE_ASSET_SUFFIXES
+    ]
+    if executable_assets:
+        evidence.append(
+            quality_issue(
+                "executable-asset",
+                0.30,
+                "assets contain executable binaries or installers",
+                files=executable_assets[:8],
+                metrics={"matches": len(executable_assets)},
+            )
+        )
+
+    script_smell_files: list[str] = []
+    for path in script_files:
+        if path.suffix.lower() not in TEXT_FILE_SUFFIXES or file_size(path) > MAX_SCAN_BYTES:
+            continue
+        text = read_text(path)
+        if any(pattern.search(text) for pattern in SCRIPT_BURDEN_PATTERNS):
+            script_smell_files.append(relative_label(root, path))
+    if len(script_files) >= 20 or script_smell_files:
+        penalty = 0.40 if len(script_files) >= 40 else 0.25
+        evidence.append(
+            quality_issue(
+                "script-maintenance-smell",
+                penalty,
+                "scripts look likely to require agent repair or local adjustment",
+                files=script_smell_files[:8],
+                metrics={"scripts_count": len(script_files), "matches": len(script_smell_files)},
+            )
+        )
+
+    syntax_error_files = python_syntax_error_files(root, script_files)
+    if syntax_error_files:
+        evidence.append(
+            quality_issue(
+                "script-syntax-error",
+                0.50,
+                "Python scripts contain syntax errors",
+                files=syntax_error_files[:8],
+                metrics={"matches": len(syntax_error_files)},
+            )
+        )
+
+    penalty = round(clamp(sum(float(item["penalty"]) for item in evidence), 0.0, 1.4), 2)
+    return {
+        "static_quality_penalty": penalty,
+        "static_quality_flags": [str(item["label"]) for item in evidence],
+        "static_quality_evidence": evidence,
+        "resource_metrics": {
+            "skill_context_units": skill_units,
+            "description_context_units": description_units,
+            "scripts_count": len(script_files),
+            "references_count": reference_count,
+            "reference_context_units": reference_units,
+            "assets_count": asset_count,
+            "asset_bytes": asset_bytes,
+        },
+    }
+
+
 def scan_skill(skill_md: Path) -> dict[str, object]:
     root = skill_md.parent
     text = read_text(skill_md)
@@ -1448,13 +1926,22 @@ def scan_skill(skill_md: Path) -> dict[str, object]:
     description = frontmatter.get("description", "")
     headings = [line.lstrip("# ").strip() for line in body.splitlines() if line.startswith("#")]
     scripts_dir = root / "scripts"
-    references_dir = root / "references"
-    script_files = [item.name for item in scripts_dir.rglob("*") if item.is_file()] if scripts_dir.exists() else []
-    reference_files = [item.name for item in references_dir.rglob("*") if item.is_file()] if references_dir.exists() else []
+    script_paths = sorted_files(scripts_dir)
+    self_relative_path = current_script_relative_to(root)
+    quality_script_paths = [
+        path
+        for path in script_paths
+        if self_relative_path is None or path.relative_to(root) != self_relative_path
+    ]
+    reference_metrics = resource_metrics(root, "references")
+    asset_metrics = resource_metrics(root, "assets")
+    script_files = [item.name for item in script_paths]
+    reference_files = [item.name for item in reference_metrics["files"]]  # type: ignore[index]
     fingerprint = " ".join(
         [name, description, " ".join(headings), " ".join(script_files), " ".join(reference_files)]
     )
-    risk = scan_risk(root, self_relative_path=current_script_relative_to(root))
+    risk = scan_risk(root, self_relative_path=self_relative_path)
+    quality = scan_static_quality(root, description, body, quality_script_paths, reference_metrics, asset_metrics)
     return {
         "name": name,
         "slug": slug,
@@ -1465,12 +1952,17 @@ def scan_skill(skill_md: Path) -> dict[str, object]:
         "headings": headings,
         "scripts_count": len(script_files),
         "references_count": len(reference_files),
+        "assets_count": quality["resource_metrics"]["assets_count"],  # type: ignore[index]
         "fingerprint": fingerprint,
         "terms": extract_terms(fingerprint),
         "risk_score": risk["risk_score"],
         "risk_level": risk["risk_level"],
         "risk_flags": risk["risk_flags"],
         "risk_evidence": risk["risk_evidence"],
+        "static_quality_penalty": quality["static_quality_penalty"],
+        "static_quality_flags": quality["static_quality_flags"],
+        "static_quality_evidence": quality["static_quality_evidence"],
+        "resource_metrics": quality["resource_metrics"],
     }
 
 
@@ -1631,6 +2123,125 @@ def impact_score(
     return max(0.0, min(4.0, round(score, 2)))
 
 
+def runtime_quality_evidence(
+    usage_record: dict[str, object],
+    ablation: dict[str, float] | None,
+) -> list[dict[str, object]]:
+    evidence: list[dict[str, object]] = []
+    calls = int(usage_record.get("calls", 0) or 0)
+    executions = coerce_int(usage_record.get("executions"))
+    script_failures = coerce_int(usage_record.get("script_failures"))
+    repair_turns = coerce_int(usage_record.get("repair_turns"))
+    reference_loads = coerce_int(usage_record.get("reference_loads"))
+    false_triggers = coerce_int(usage_record.get("false_triggers"))
+
+    if calls >= 8 and executions is not None:
+        execution_rate = executions / max(calls, 1)
+        if execution_rate < 0.25:
+            evidence.append(
+                quality_issue(
+                    "overtrigger-low-execution",
+                    0.45,
+                    "many activations have little evidence of actual execution",
+                    metrics={"calls": calls, "executions": executions, "execution_rate": round(execution_rate, 2)},
+                )
+            )
+
+    if calls >= 5 and false_triggers:
+        false_rate = false_triggers / max(calls, 1)
+        if false_triggers >= 3 or false_rate >= 0.25:
+            evidence.append(
+                quality_issue(
+                    "overtrigger-misfire",
+                    0.35,
+                    "usage evidence reports frequent accidental activations",
+                    metrics={"calls": calls, "false_triggers": false_triggers, "false_rate": round(false_rate, 2)},
+                )
+            )
+
+    if calls >= 5 and ablation and ablation.get("cases", 0) > 0:
+        consistency = float(ablation.get("consistency_rate", 0.0))
+        better = float(ablation.get("better_rate", 0.0))
+        if consistency >= 0.85 and better <= 0.10:
+            evidence.append(
+                quality_issue(
+                    "overtrigger-no-impact",
+                    0.40,
+                    "frequent activation has high ablation consistency and little measured gain",
+                    metrics={"calls": calls, "consistency_rate": round(consistency, 2), "better_rate": round(better, 2)},
+                )
+            )
+
+    if calls > 0 and reference_loads is not None:
+        loads_per_call = reference_loads / max(calls, 1)
+        if reference_loads >= 10 and loads_per_call >= 3.0:
+            evidence.append(
+                quality_issue(
+                    "reference-overload",
+                    0.30,
+                    "usage evidence reports heavy reference loading",
+                    metrics={
+                        "calls": calls,
+                        "reference_loads": reference_loads,
+                        "reference_loads_per_call": round(loads_per_call, 2),
+                    },
+                )
+            )
+
+    if script_failures:
+        denominator = max(executions or calls or script_failures, 1)
+        failure_rate = script_failures / denominator
+        if script_failures >= 3 or failure_rate >= 0.30:
+            evidence.append(
+                quality_issue(
+                    "script-failure-burden",
+                    0.45,
+                    "usage evidence reports script failures",
+                    metrics={
+                        "script_failures": script_failures,
+                        "executions": executions,
+                        "failure_rate": round(failure_rate, 2),
+                    },
+                )
+            )
+        else:
+            evidence.append(
+                quality_issue(
+                    "script-failure-burden",
+                    0.20,
+                    "usage evidence reports occasional script failure",
+                    metrics={"script_failures": script_failures, "executions": executions},
+                )
+            )
+
+    if repair_turns and repair_turns >= 3:
+        evidence.append(
+            quality_issue(
+                "agent-repair-burden",
+                0.30,
+                "usage evidence reports repeated agent repair turns",
+                metrics={"repair_turns": repair_turns},
+            )
+        )
+
+    return evidence
+
+
+def quality_penalty(
+    skill: dict[str, object],
+    usage_record: dict[str, object],
+    ablation: dict[str, float] | None,
+) -> dict[str, object]:
+    evidence = list(skill.get("static_quality_evidence", []))
+    evidence.extend(runtime_quality_evidence(usage_record, ablation))
+    penalty = round(clamp(sum(float(item["penalty"]) for item in evidence), 0.0, 2.0), 2)
+    return {
+        "penalty": penalty,
+        "flags": [str(item["label"]) for item in evidence],
+        "evidence": evidence,
+    }
+
+
 def confidence_score(
     usage_source: str,
     usage_record: dict[str, object],
@@ -1683,6 +2294,7 @@ def recommend_action(
     total: float,
     confidence: float,
     risk_level: str,
+    quality_penalty_value: float,
     calls: int,
     overlap: float,
     community_prior: float | None,
@@ -1696,13 +2308,17 @@ def recommend_action(
         return "quarantine-review", "high-risk patterns require manual review", False
     if risk_level == "medium" and total >= 6.0:
         return "keep-review-risk", "useful locally with medium-risk patterns", False
+    if quality_penalty_value >= 1.2 and total >= 6.0:
+        return "keep-review-burden", "useful locally but expensive to maintain or load", False
+    if quality_penalty_value >= 1.2 and total >= 4.5:
+        return "review-burden", "quality burden lowers the final score", False
 
     if total >= 8.0:
-        return "keep", "high local score", False
+        return "keep", "high final score", False
     if total >= 6.0:
         if overlap >= 0.65 and calls <= 1:
             return "keep-narrow", "high overlap suggests narrower scope", False
-        return "keep-narrow", "good local score", False
+        return "keep-narrow", "good final score", False
 
     if confidence < 0.55:
         return "observe-30d", "evidence confidence is low", False
@@ -1714,23 +2330,23 @@ def recommend_action(
         if overlap >= 0.65:
             return "merge-or-review", "mid score with high overlap", False
         if community_prior is not None and community_prior >= 0.6:
-            return "review-vs-community", "community signal is stronger than local score", False
-        return "review", "mid local score", False
+            return "review-vs-community", "community signal is stronger than final score", False
+        return "review", "mid final score", False
 
     if kind in {"api", "tool"}:
         if calls == 0 and overlap >= 0.75:
             return "merge-delete", "unused duplicate protected skill", True
         if community_prior is not None and community_prior >= 0.6:
             return "review-vs-community", "protected skill has strong community signal", False
-        return "merge-or-review", "protected skill scores low locally", False
+        return "merge-or-review", "protected skill scores low after burden", False
 
     if community_prior is not None and community_prior >= 0.6:
         return "review-vs-community", "community signal suggests benchmark before removal", False
     if total < 3.0:
-        return "delete", "very low local score", True
+        return "delete", "very low final score", True
     if overlap >= 0.65 and calls <= 1:
         return "merge-delete", "low usage plus high overlap", True
-    return "merge-delete", "low local score", True
+    return "merge-delete", "low final score", True
 
 
 def short_risk_flags(flags: list[str]) -> str:
@@ -1749,6 +2365,8 @@ def build_basis(
     ablation: dict[str, float] | None,
     community_prior: float | None,
     risk_flags: list[str],
+    quality_penalty_value: float,
+    quality_flags: list[str],
     evidence_note: str | None,
 ) -> str:
     parts = [f"calls={int(usage_record.get('calls', 0) or 0)}"]
@@ -1772,6 +2390,10 @@ def build_basis(
         parts.append(f"community={community_prior:.2f}")
     if risk_flags:
         parts.append(f"risk={short_risk_flags(risk_flags)}")
+    if quality_penalty_value > 0:
+        parts.append(f"burden={quality_penalty_value:.2f}")
+    if quality_flags:
+        parts.append(f"quality={short_risk_flags(quality_flags)}")
     if evidence_note:
         parts.append(f"note={evidence_note}")
     return "; ".join(parts)
@@ -1815,6 +2437,20 @@ def fmt_breakdown_components(breakdown: dict[str, float]) -> str:
     return ", ".join(f"{key}={breakdown[key]:.3f}" for key in ordered_keys)
 
 
+def summarize_quality_evidence(evidence: list[dict[str, object]], limit: int = 3) -> str:
+    if not evidence:
+        return "-"
+    parts = []
+    for item in evidence[:limit]:
+        label = str(item.get("label", "quality"))
+        reason = str(item.get("reason", "")).strip()
+        penalty = fmt_optional_float(item.get("penalty"))
+        parts.append(f"{label}({penalty}): {reason}" if reason else f"{label}({penalty})")
+    if len(evidence) > limit:
+        parts.append(f"+{len(evidence) - limit} more")
+    return "; ".join(parts)
+
+
 def determine_report_mode(
     usage_paths: list[Path],
     history_paths: list[Path],
@@ -1826,6 +2462,205 @@ def determine_report_mode(
     if any(item["missing_usage"] or item["missing_ablation"] for item in results):
         return "partial-evidence"
     return "strong-evidence"
+
+
+def ablation_priority(item: dict[str, object]) -> tuple[int, list[str]]:
+    if item["kind"] != "general":
+        return 0, []
+    ablation = item.get("score_breakdown", {}).get("impact", {}).get("ablation")  # type: ignore[union-attr]
+    cases = int((ablation or {}).get("cases", 0)) if isinstance(ablation, dict) else 0
+    if cases >= 5:
+        return 0, ["already has enough ablation cases"]
+
+    score = 0
+    reasons: list[str] = []
+    if item["missing_ablation"]:
+        score += 2
+        reasons.append("missing ablation")
+    if float(item["final_score"]) < 6.0:
+        score += 2
+        reasons.append("weak final score")
+    if float(item["overlap_value"]) >= 0.65:
+        score += 2
+        reasons.append("high overlap")
+    if float(item["quality_penalty"]) >= 0.6:
+        score += 2
+        reasons.append("high quality burden")
+    elif float(item["quality_penalty"]) > 0:
+        score += 1
+        reasons.append("some quality burden")
+    if int(item["calls"]) >= 5:
+        score += 1
+        reasons.append("frequent activation")
+    if str(item["usage_source"]) in {"history", "missing"}:
+        score += 1
+        reasons.append("weak usage evidence")
+    if float(item["confidence_score"]) < 0.55:
+        score += 1
+        reasons.append("low confidence")
+    if str(item["action"]) not in {"keep", "keep-narrow", "keep-system"}:
+        score += 1
+        reasons.append(f"action={item['action']}")
+    return score, reasons
+
+
+def estimate_model_cost(case_count: int) -> dict[str, int]:
+    return {name: case_count * per_case for name, per_case in ABLATION_COST_PROFILES.items()}
+
+
+def reduction_percent(planned: int, baseline: int) -> float:
+    if baseline <= 0:
+        return 0.0
+    return round(clamp(1.0 - planned / baseline, 0.0, 1.0) * 100, 1)
+
+
+def accuracy_impact(candidates: list[dict[str, object]], deferred: list[dict[str, object]]) -> dict[str, object]:
+    risky_deferred = [
+        item
+        for item in deferred
+        if item["kind"] == "general"
+        and item["missing_ablation"]
+        and (float(item["final_score"]) < 6.0 or float(item["overlap_value"]) >= 0.65 or float(item["quality_penalty"]) >= 0.6)
+    ]
+    if not candidates:
+        level = "high"
+        reason = "no general skill was selected for ablation"
+    elif risky_deferred:
+        level = "medium"
+        reason = f"{len(risky_deferred)} deferred general skills still carry weak-score, overlap, or burden signals"
+    else:
+        level = "low"
+        reason = "deferred skills have stronger local evidence or lower ablation priority"
+    return {
+        "expected_accuracy_impact": level,
+        "reason": reason,
+        "mitigations": [
+            "use pairwise A/B comparison instead of single-output grading",
+            "expand from 3 to 5 cases when the first batch is mixed",
+            "expand to 10 cases only for decision-boundary skills",
+            "cache replay outputs by skill, case, model, prompt, and artifact hash",
+            "review deferred skills when new usage or quality-burden evidence appears",
+        ],
+    }
+
+
+def build_ablation_plan(results: list[dict[str, object]], max_candidates: int = ABLATION_DEFAULT_MAX_CANDIDATES) -> dict[str, object]:
+    general = [item for item in results if item["kind"] == "general"]
+    scored: list[tuple[int, dict[str, object], list[str]]] = []
+    for item in general:
+        score, reasons = ablation_priority(item)
+        scored.append((score, item, reasons))
+
+    scored.sort(key=lambda entry: (-entry[0], float(entry[1]["final_score"]), str(entry[1]["display_name"])))
+    positive = [entry for entry in scored if entry[0] >= 3]
+    if not positive:
+        positive = [entry for entry in scored if entry[0] > 0][:ABLATION_MIN_CANDIDATES]
+    candidate_entries = positive[:max_candidates]
+    candidate_paths = {str(entry[1]["path"]) for entry in candidate_entries}
+
+    candidates = []
+    for priority, item, reasons in candidate_entries:
+        candidates.append(
+            {
+                "skill": item["display_name"],
+                "path": item["path"],
+                "priority_score": priority,
+                "priority_reasons": reasons,
+                "initial_cases": ABLATION_INITIAL_CASES,
+                "expand_to": ABLATION_EXPAND_CASES,
+                "max_cases": ABLATION_MAX_CASES,
+                "recommended_judge": "pairwise A/B comparison with pass/fail and same/better/worse labels",
+                "case_selection": [
+                    "prefer real production/history prompts where the skill triggered",
+                    "include tasks near the skill boundary or with prior repair burden",
+                    "deduplicate prompts by normalized text and artifact hash",
+                ],
+            }
+        )
+
+    deferred = []
+    for priority, item, reasons in scored:
+        if str(item["path"]) in candidate_paths:
+            continue
+        deferred.append(
+            {
+                "skill": item["display_name"],
+                "path": item["path"],
+                "priority_score": priority,
+                "defer_reasons": reasons or ["low ablation priority"],
+                "local_score": item["local_score"],
+                "quality_penalty": item["quality_penalty"],
+                "final_score": item["final_score"],
+            }
+        )
+
+    eligible_count = len(general)
+    candidate_count = len(candidates)
+    baseline_cases = eligible_count * ABLATION_BASELINE_CASES
+    initial_cases = candidate_count * ABLATION_INITIAL_CASES
+    expected_cases = candidate_count * ABLATION_EXPAND_CASES
+    max_cases = candidate_count * ABLATION_MAX_CASES
+    baseline_cost = estimate_model_cost(baseline_cases)
+    initial_cost = estimate_model_cost(initial_cases)
+    expected_cost = estimate_model_cost(expected_cases)
+    max_cost = estimate_model_cost(max_cases)
+
+    return {
+        "strategy": "triage-pairwise-early-stop",
+        "eligible_general_skills": eligible_count,
+        "candidate_skills": candidate_count,
+        "deferred_general_skills": len(deferred),
+        "case_policy": {
+            "baseline_cases_per_general_skill": ABLATION_BASELINE_CASES,
+            "initial_cases_per_candidate": ABLATION_INITIAL_CASES,
+            "expand_to_cases": ABLATION_EXPAND_CASES,
+            "max_cases_per_candidate": ABLATION_MAX_CASES,
+        },
+        "stop_rules": {
+            "stop_delete_candidate": "3/3 cases are same and better_rate is 0",
+            "stop_keep_candidate": "2/3 or better show clear improvement and no worse cases",
+            "expand": "mixed first batch or final_score is between 3.0 and 6.5",
+            "max": "only for high-impact or deletion-boundary decisions",
+        },
+        "judge_protocol": {
+            "mode": "pairwise",
+            "bias_control": "randomize A/B order and spot-check reversed order on boundary cases",
+            "labels": ["better", "same", "worse"],
+            "deterministic_metrics": ["pass", "score", "tool_cost", "latency", "repair_turns"],
+        },
+        "cache_keys": ["skill", "case_id", "model", "prompt_hash", "artifact_hash", "skill_version"],
+        "model_cost_estimates": {
+            "profiles_per_case_units": ABLATION_COST_PROFILES,
+            "baseline_full_protocol": {
+                "cases": baseline_cases,
+                "model_cost_units": baseline_cost,
+            },
+            "planned_initial": {
+                "cases": initial_cases,
+                "model_cost_units": initial_cost,
+                "reduction_vs_baseline_percent": {
+                    name: reduction_percent(initial_cost[name], baseline_cost[name]) for name in ABLATION_COST_PROFILES
+                },
+            },
+            "planned_expected": {
+                "cases": expected_cases,
+                "model_cost_units": expected_cost,
+                "reduction_vs_baseline_percent": {
+                    name: reduction_percent(expected_cost[name], baseline_cost[name]) for name in ABLATION_COST_PROFILES
+                },
+            },
+            "planned_max": {
+                "cases": max_cases,
+                "model_cost_units": max_cost,
+                "reduction_vs_baseline_percent": {
+                    name: reduction_percent(max_cost[name], baseline_cost[name]) for name in ABLATION_COST_PROFILES
+                },
+            },
+        },
+        "accuracy_tradeoff": accuracy_impact([entry[1] for entry in candidate_entries], [item for _, item, _ in scored if str(item["path"]) not in candidate_paths]),
+        "candidates": candidates,
+        "deferred": deferred,
+    }
 
 
 def existing_paths(label: str, raw_paths: list[str] | None) -> list[Path]:
@@ -1901,6 +2736,10 @@ def run_audit(args: argparse.Namespace) -> int:
         uniq_score = uniqueness_score(best_overlap)
         i_score = impact_score(kind, calls, best_overlap, skill, ablation_summary)
         total = round(u_score + uniq_score + i_score, 2)
+        quality = quality_penalty(skill, usage_record, ablation_summary)
+        quality_penalty_value = float(quality["penalty"])
+        quality_flags = list(quality["flags"])  # type: ignore[arg-type]
+        final = round(clamp(total - quality_penalty_value, 0.0, 10.0), 2)
         confidence = confidence_score(
             usage_source,
             usage_record,
@@ -1912,9 +2751,10 @@ def run_audit(args: argparse.Namespace) -> int:
         action, action_reason, delete_candidate = recommend_action(
             str(skill["source"]),
             kind,
-            total,
+            final,
             confidence,
             str(skill["risk_level"]),
+            quality_penalty_value,
             calls,
             best_overlap,
             community_prior,
@@ -1928,6 +2768,11 @@ def run_audit(args: argparse.Namespace) -> int:
                 "recent_30d_calls": coerce_int(usage_record.get("recent_30d_calls")),
                 "recent_90d_calls": coerce_int(usage_record.get("recent_90d_calls")),
                 "last_used_at": usage_record.get("last_used_at"),
+                "executions": coerce_int(usage_record.get("executions")),
+                "script_failures": coerce_int(usage_record.get("script_failures")),
+                "repair_turns": coerce_int(usage_record.get("repair_turns")),
+                "reference_loads": coerce_int(usage_record.get("reference_loads")),
+                "false_triggers": coerce_int(usage_record.get("false_triggers")),
             },
             "uniqueness": {
                 "score": uniq_score,
@@ -1950,6 +2795,11 @@ def run_audit(args: argparse.Namespace) -> int:
                 "score": skill["risk_score"],
                 "flags": skill["risk_flags"],
             },
+            "quality": {
+                "penalty": quality_penalty_value,
+                "flags": quality_flags,
+                "resource_metrics": skill["resource_metrics"],
+            },
             "confidence": {
                 "score": confidence,
             },
@@ -1970,6 +2820,11 @@ def run_audit(args: argparse.Namespace) -> int:
                 "active_days": coerce_int(usage_record.get("active_days")),
                 "first_seen_at": usage_record.get("first_seen_at"),
                 "last_used_at": usage_record.get("last_used_at"),
+                "executions": coerce_int(usage_record.get("executions")),
+                "script_failures": coerce_int(usage_record.get("script_failures")),
+                "repair_turns": coerce_int(usage_record.get("repair_turns")),
+                "reference_loads": coerce_int(usage_record.get("reference_loads")),
+                "false_triggers": coerce_int(usage_record.get("false_triggers")),
                 "usage_source": usage_source,
                 "evidence_weight": evidence_weight,
                 "usage_score": u_score,
@@ -1977,8 +2832,13 @@ def run_audit(args: argparse.Namespace) -> int:
                 "impact_score": i_score,
                 "local_score": total,
                 "total_score": total,
+                "quality_penalty": quality_penalty_value,
+                "quality_flags": quality_flags,
+                "quality_evidence": quality["evidence"],
+                "resource_metrics": skill["resource_metrics"],
+                "final_score": final,
                 "confidence_score": confidence,
-                "verdict": verdict(total),
+                "verdict": verdict(final),
                 "action": action,
                 "action_reason": action_reason,
                 "delete_candidate": delete_candidate,
@@ -2005,6 +2865,8 @@ def run_audit(args: argparse.Namespace) -> int:
                     ablation_summary,
                     community_prior,
                     list(skill["risk_flags"]),
+                    quality_penalty_value,
+                    quality_flags,
                     evidence_note,
                 ),
                 "missing_usage": usage_source == "missing",
@@ -2013,17 +2875,18 @@ def run_audit(args: argparse.Namespace) -> int:
             }
         )
 
-    ranked = sorted(results, key=lambda item: (-float(item["local_score"]), str(item["display_name"])))
+    ranked = sorted(results, key=lambda item: (-float(item["final_score"]), str(item["display_name"])))
     recommended_actions = sorted(
         [item for item in ranked if str(item["action"]) not in {"keep", "keep-narrow", "keep-system"}],
-        key=lambda item: (str(item["action"]), float(item["local_score"]), str(item["display_name"])),
+        key=lambda item: (str(item["action"]), float(item["final_score"]), str(item["display_name"])),
     )
     delete_candidates = sorted(
         [item for item in ranked if item["delete_candidate"]],
-        key=lambda item: (float(item["local_score"]), str(item["display_name"])),
+        key=lambda item: (float(item["final_score"]), str(item["display_name"])),
     )
     missing = [item for item in ranked if item["missing_usage"] or item["missing_ablation"] or item["missing_community"]]
     report_mode = determine_report_mode(usage_paths, history_paths, ablation_paths, ranked)
+    ablation_plan = build_ablation_plan(ranked, max_candidates=int(args.ablation_plan_max_candidates))
 
     score_rows = []
     for index, item in enumerate(ranked, start=1):
@@ -2042,6 +2905,8 @@ def run_audit(args: argparse.Namespace) -> int:
                 fmt_optional_float(item["confidence_score"]),
                 str(item["risk_level"]),
                 f"{item['local_score']:.1f}",
+                f"{item['quality_penalty']:.1f}",
+                f"{item['final_score']:.1f}",
                 str(item["verdict"]),
                 str(item["action"]),
                 str(item["basis"]),
@@ -2076,7 +2941,9 @@ def run_audit(args: argparse.Namespace) -> int:
                 "Comm",
                 "Conf",
                 "Risk",
-                "Total",
+                "Local",
+                "Burden",
+                "Final",
                 "Verdict",
                 "Action",
                 "Basis",
@@ -2084,6 +2951,38 @@ def run_audit(args: argparse.Namespace) -> int:
             score_rows,
         ),
     ]
+
+    if ablation_plan["candidate_skills"]:
+        expected_reduction = ablation_plan["model_cost_estimates"]["planned_expected"]["reduction_vs_baseline_percent"]  # type: ignore[index]
+        realistic_reduction = expected_reduction["realistic"]  # type: ignore[index]
+        report_parts.extend(
+            [
+                "",
+                "## Cost-Efficient Ablation Plan",
+                "",
+                f"- Strategy: {ablation_plan['strategy']}",
+                f"- Eligible general skills: {ablation_plan['eligible_general_skills']}",
+                f"- Candidate skills: {ablation_plan['candidate_skills']}",
+                f"- Deferred general skills: {ablation_plan['deferred_general_skills']}",
+                f"- Expected model-cost reduction vs 10-case full protocol: {realistic_reduction}%",
+                f"- Expected accuracy impact: {ablation_plan['accuracy_tradeoff']['expected_accuracy_impact']}",
+                "",
+                markdown_table(
+                    ["Skill", "Priority", "Initial", "Expand", "Max", "Reasons"],
+                    [
+                        [
+                            str(item["skill"]),
+                            str(item["priority_score"]),
+                            str(item["initial_cases"]),
+                            str(item["expand_to"]),
+                            str(item["max_cases"]),
+                            ", ".join(item["priority_reasons"]),
+                        ]
+                        for item in ablation_plan["candidates"]  # type: ignore[index]
+                    ],
+                ),
+            ]
+        )
 
     community_rows = []
     for item in ranked:
@@ -2108,11 +3007,36 @@ def run_audit(args: argparse.Namespace) -> int:
             ]
         )
 
+    quality_rows = []
+    for item in ranked:
+        if float(item["quality_penalty"]) <= 0:
+            continue
+        quality_rows.append(
+            [
+                str(item["display_name"]),
+                f"{item['quality_penalty']:.1f}",
+                short_risk_flags(list(item["quality_flags"])),
+                summarize_quality_evidence(list(item["quality_evidence"])),
+            ]
+        )
+
+    if quality_rows:
+        report_parts.extend(
+            [
+                "",
+                "## Quality Burden",
+                "",
+                markdown_table(["Skill", "Burden", "Flags", "Evidence"], quality_rows),
+            ]
+        )
+
     if recommended_actions:
         action_rows = [
             [
                 str(item["display_name"]),
                 f"{item['local_score']:.1f}",
+                f"{item['quality_penalty']:.1f}",
+                f"{item['final_score']:.1f}",
                 fmt_optional_float(item["confidence_score"]),
                 str(item["risk_level"]),
                 str(item["action"]),
@@ -2125,7 +3049,7 @@ def run_audit(args: argparse.Namespace) -> int:
                 "",
                 "## Recommended Actions",
                 "",
-                markdown_table(["Skill", "Total", "Confidence", "Risk", "Action", "Reason"], action_rows),
+                markdown_table(["Skill", "Local", "Burden", "Final", "Confidence", "Risk", "Action", "Reason"], action_rows),
             ]
         )
 
@@ -2134,6 +3058,8 @@ def run_audit(args: argparse.Namespace) -> int:
             [
                 str(item["display_name"]),
                 f"{item['local_score']:.1f}",
+                f"{item['quality_penalty']:.1f}",
+                f"{item['final_score']:.1f}",
                 str(item["kind"]),
                 str(item["action"]),
                 str(item["delete_trigger"]),
@@ -2146,7 +3072,7 @@ def run_audit(args: argparse.Namespace) -> int:
                 "",
                 "## Delete Candidates",
                 "",
-                markdown_table(["Skill", "Total", "Kind", "Action", "Trigger", "Reason"], delete_rows),
+                markdown_table(["Skill", "Local", "Burden", "Final", "Kind", "Action", "Trigger", "Reason"], delete_rows),
             ]
         )
 
@@ -2189,12 +3115,21 @@ def run_audit(args: argparse.Namespace) -> int:
             "report_mode": report_mode,
             "recommended_actions": len(recommended_actions),
             "delete_candidates": len(delete_candidates),
+            "ablation_plan": ablation_plan,
             "results": ranked,
         }
         json_path = Path(args.json_out).expanduser().resolve()
         json_path.parent.mkdir(parents=True, exist_ok=True)
         json_path.write_text(
             json.dumps(payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+    if args.ablation_plan_out:
+        plan_path = Path(args.ablation_plan_out).expanduser().resolve()
+        plan_path.parent.mkdir(parents=True, exist_ok=True)
+        plan_path.write_text(
+            json.dumps(ablation_plan, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
 
@@ -2213,6 +3148,13 @@ def build_parser() -> argparse.ArgumentParser:
     audit_parser.add_argument("--community-file", action="append", help="Offline JSON/JSONL/CSV/TSV file with registry metrics.")
     audit_parser.add_argument("--markdown-out", help="Write the Markdown report to this file.")
     audit_parser.add_argument("--json-out", help="Write machine-readable JSON output to this file.")
+    audit_parser.add_argument("--ablation-plan-out", help="Write a cost-efficient ablation plan JSON file.")
+    audit_parser.add_argument(
+        "--ablation-plan-max-candidates",
+        type=int,
+        default=ABLATION_DEFAULT_MAX_CANDIDATES,
+        help="Maximum general skills to include in the cost-efficient ablation plan.",
+    )
     audit_parser.add_argument("--include-system", action="store_true", help="Include system skills during discovery.")
     audit_parser.set_defaults(func=run_audit)
 

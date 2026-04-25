@@ -1,10 +1,12 @@
 # Scoring Rubric
 
-Score each skill with one local 10-point score and three side signals.
+Score each skill with one local 10-point score, one final score, and side signals.
 
 ## Core Outputs
 
 - `local_score = usage_score + uniqueness_score + impact_score`
+- `quality_penalty`: `0.0-2.0`
+- `final_score = clamp(local_score - quality_penalty, 0.0, 10.0)`
 - `usage_score`: `0.0-3.0`
 - `uniqueness_score`: `0.0-3.0`
 - `impact_score`: `0.0-4.0`
@@ -13,7 +15,7 @@ Score each skill with one local 10-point score and three side signals.
 - `risk_level`: `none / low / medium / high`
 
 Keep `community_prior_score` and `risk_level` separate from `local_score`.
-Use them to shape review priority and final action.
+Use quality burden, community prior, and risk to shape review priority and final action.
 
 ## 1. Usage Score (`0.0-3.0`)
 
@@ -29,6 +31,11 @@ Use transcript mentions only as weaker fallback evidence.
 - `active_days`
 - `usage_source`
 - `evidence_weight`
+- `executions`
+- `script_failures`
+- `repair_turns`
+- `reference_loads`
+- `false_triggers`
 
 ### Base Usage Strength
 
@@ -135,7 +142,43 @@ Add:
 
 Clamp the final confidence score to `0.0-1.0`.
 
-## 5. Community Prior Score (`0.0-1.0`)
+## 5. Quality Penalty (`0.0-2.0`)
+
+Quality penalty captures the cost of keeping a skill even when it has some utility.
+It is a deduction from `local_score`, not a risk flag.
+
+### Runtime burden
+
+Use direct usage logs when available:
+
+- add `0.45` when `calls >= 8` and `executions / calls < 0.25`
+- add `0.35` when `false_triggers >= 3` or `false_triggers / calls >= 0.25`
+- add `0.40` when `calls >= 5`, `consistency_rate >= 0.85`, and `better_rate <= 0.10`
+- add `0.30` when `reference_loads >= 10` and `reference_loads / calls >= 3.0`
+- add `0.45` when script failures are frequent
+- add `0.20` when script failures are occasional
+- add `0.30` when `repair_turns >= 3`
+
+### Static bundle burden
+
+Scan installed skill files:
+
+- add `0.20-0.40` for large `SKILL.md` bodies
+- add `0.25` for broad trigger language in the frontmatter description
+- add `0.20-0.30` when reference files are not directly disclosed from `SKILL.md`
+- add `0.25-0.50` for large reference sets or heavy reference text
+- add `0.10-0.20` when long reference files have no visible table of contents
+- add `0.20` when resource filenames are too generic for selective loading
+- add `0.25-0.50` for large assets directories
+- add `0.60` for bundled files that look private or environment-specific
+- add `0.30` for executable assets
+- add `0.25-0.40` for scripts with placeholders, local absolute paths, or maintenance smells
+- add `0.50` for Python script syntax errors
+
+Clamp the combined penalty to `0.0-2.0`.
+Emit `quality_flags`, `quality_evidence`, `resource_metrics`, and `score_breakdown.quality`.
+
+## 6. Community Prior Score (`0.0-1.0`)
 
 Treat community data as external prior, not a local verdict.
 
@@ -153,7 +196,7 @@ Use it to rank review priority and benchmark replacements.
 
 Emit `community_breakdown` in JSON so users can see which registry signals contributed.
 
-## 6. Risk Level
+## 7. Risk Level
 
 Run static scans against runnable scripts and resource files.
 
@@ -177,6 +220,8 @@ Risk levels:
 
 ## Verdict Bands
 
+Use `final_score` for verdict bands.
+
 - `8.0-10.0`: keep
 - `6.0-7.9`: keep, narrow when overlap stays high
 - `4.5-5.9`: review
@@ -186,12 +231,14 @@ Risk levels:
 ## Action Rules
 
 - `high risk`: `quarantine-review`
-- `medium risk + strong local score`: `keep-review-risk`
-- `low confidence + weak local score`: `observe-30d`
-- `low local score + high overlap`: `merge-delete`
-- `very low local score`: `delete`
-- `low local score + strong community prior`: `review-vs-community`
+- `medium risk + strong final score`: `keep-review-risk`
+- `high quality burden + strong final score`: `keep-review-burden`
+- `high quality burden + mid final score`: `review-burden`
+- `low confidence + weak final score`: `observe-30d`
+- `low final score + high overlap`: `merge-delete`
+- `very low final score`: `delete`
+- `low final score + strong community prior`: `review-vs-community`
 
 Community data shapes review order.
 Risk level shapes safety action.
-Local score stays the main usefulness judgment.
+Quality burden turns "useful but expensive" skills into review items.
