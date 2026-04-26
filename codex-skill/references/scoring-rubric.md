@@ -6,6 +6,7 @@ Score each skill with one local 10-point score, one final score, and side signal
 
 - `local_score = usage_score + uniqueness_score + impact_score`
 - `quality_penalty`: `0.0-2.0`
+- `quality_penalty_uncapped`: raw quality burden before the cap
 - `final_score = clamp(local_score - quality_penalty, 0.0, 10.0)`
 - `usage_score`: `0.0-3.0`
 - `uniqueness_score`: `0.0-3.0`
@@ -172,11 +173,12 @@ Scan installed skill files:
 - add `0.25-0.50` for large assets directories
 - add `0.60` for bundled files that look private or environment-specific
 - add `0.30` for executable assets
+- add `0.10-0.20` when script count suggests over-bundling
 - add `0.25-0.40` for scripts with placeholders, local absolute paths, or maintenance smells
 - add `0.50` for Python script syntax errors
 
 Clamp the combined penalty to `0.0-2.0`.
-Emit `quality_flags`, `quality_evidence`, `resource_metrics`, and `score_breakdown.quality`.
+Emit `quality_flags`, `quality_evidence`, `resource_metrics`, `quality_penalty_uncapped`, and `score_breakdown.quality`.
 
 ## 6. Community Prior Score (`0.0-1.0`)
 

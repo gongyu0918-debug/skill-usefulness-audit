@@ -15,6 +15,7 @@ from unittest import mock
 REPO_ROOT = Path(__file__).resolve().parents[1]
 AUDIT_SCRIPT = REPO_ROOT / "codex-skill" / "scripts" / "skill_usefulness_audit.py"
 SYNC_SCRIPT = REPO_ROOT / "scripts" / "sync_bundle.py"
+CURRENT_VERSION = (REPO_ROOT / "VERSION").read_text(encoding="utf-8").strip()
 
 
 def load_module(path: Path, module_name: str):
@@ -482,6 +483,59 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
         self.assertIn("vague-resource-names", item["quality_flags"])
         self.assertIn("script-syntax-error", item["quality_flags"])
 
+    def test_script_pass_smell_matches_non_final_lines(self) -> None:
+        skills_root = self.tempdir / "skills"
+        skill_dir = write_skill(skills_root, "stub-helper", "Run local helper scripts.")
+        (skill_dir / "scripts" / "stub.py").write_text(
+            "def todo():\n    pass\n\n\ndef done():\n    return 1\n",
+            encoding="utf-8",
+        )
+
+        payload = self.run_audit_json("--skills-root", str(skills_root))
+
+        item = self.first_result(payload, "stub-helper")
+        self.assertIn("script-maintenance-smell", item["quality_flags"])
+        smell = next(issue for issue in item["quality_evidence"] if issue["label"] == "script-maintenance-smell")
+        self.assertIn("scripts/stub.py", smell["files"])
+
+    def test_large_clean_script_count_has_specific_bloat_flag(self) -> None:
+        skills_root = self.tempdir / "skills"
+        skill_dir = write_skill(skills_root, "many-scripts-helper", "Run a focused script suite.")
+        for index in range(25):
+            (skill_dir / "scripts" / f"script_{index}.py").write_text(f"print({index})\n", encoding="utf-8")
+
+        payload = self.run_audit_json("--skills-root", str(skills_root))
+
+        item = self.first_result(payload, "many-scripts-helper")
+        self.assertIn("script-count-bloat", item["quality_flags"])
+        self.assertNotIn("script-maintenance-smell", item["quality_flags"])
+        count_issue = next(issue for issue in item["quality_evidence"] if issue["label"] == "script-count-bloat")
+        self.assertEqual(count_issue["metrics"]["scripts_count"], 25)
+
+    def test_chinese_body_counts_toward_context_burden(self) -> None:
+        skills_root = self.tempdir / "skills"
+        write_skill(
+            skills_root,
+            "chinese-heavy-helper",
+            "Use for focused Chinese drafting.",
+            extra_body="测试" * 1800,
+        )
+
+        payload = self.run_audit_json("--skills-root", str(skills_root))
+
+        item = self.first_result(payload, "chinese-heavy-helper")
+        self.assertGreaterEqual(item["resource_metrics"]["skill_context_units"], 5000)
+        self.assertIn("prompt-bloat", item["quality_flags"])
+
+    def test_reference_disclosure_ignores_short_generic_stem_mentions(self) -> None:
+        root = self.tempdir / "skill"
+        reference = root / "references" / "api.md"
+        reference.parent.mkdir(parents=True)
+        reference.write_text("details\n", encoding="utf-8")
+
+        self.assertFalse(AUDIT_MODULE.reference_is_directly_disclosed("write api client notes", root, reference))
+        self.assertTrue(AUDIT_MODULE.reference_is_directly_disclosed("read references/api.md first", root, reference))
+
     def test_runtime_quality_burden_flags_overtrigger_and_repair_cost(self) -> None:
         skills_root = self.tempdir / "skills"
         write_skill(skills_root, "overtrigger-helper", "Rewrite prompts for clearer task execution.")
@@ -537,6 +591,16 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
         self.assertIn("script-failure-burden", item["quality_flags"])
         self.assertIn("agent-repair-burden", item["quality_flags"])
         self.assertIn("quality", item["score_breakdown"])
+
+    def test_script_failure_rate_respects_explicit_zero_executions(self) -> None:
+        evidence = AUDIT_MODULE.runtime_quality_evidence(
+            {"calls": 50, "executions": 0, "script_failures": 5},
+            None,
+        )
+
+        failure = next(issue for issue in evidence if issue["label"] == "script-failure-burden")
+        self.assertEqual(failure["metrics"]["denominator_source"], "executions")
+        self.assertEqual(failure["metrics"]["failure_rate"], 1.0)
 
     def test_risk_scan_flags_high_risk_skill(self) -> None:
         skills_root = self.tempdir / "skills"
@@ -758,7 +822,7 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
         source_script = (isolated_repo / "codex-skill" / "scripts" / "skill_usefulness_audit.py").read_text(encoding="utf-8")
         bundle_script = (isolated_repo / "skill" / "scripts" / "skill_usefulness_audit.py").read_text(encoding="utf-8")
         self.assertIn("slug: skill-usefulness-audit", bundle_skill)
-        self.assertIn("version: 0.2.6", bundle_skill)
+        self.assertIn(f"version: {CURRENT_VERSION}", bundle_skill)
         self.assertIn("Finds unused, overlapping, risky, or under-evidenced agent skills", bundle_skill)
         self.assertFalse((isolated_repo / "skill" / "scripts" / "__pycache__").exists())
         self.assertEqual(bundle_script, source_script)
@@ -825,6 +889,7 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
         self.assertEqual(plan["strategy"], "triage-pairwise-early-stop")
         self.assertEqual(plan["candidate_skills"], 3)
         self.assertEqual(plan["case_policy"]["initial_cases_per_candidate"], 3)
+        self.assertEqual(plan["model_cost_estimates"]["unit"], "estimated_context_units_per_case")
         self.assertGreater(
             plan["model_cost_estimates"]["planned_expected"]["reduction_vs_baseline_percent"]["realistic"],
             0,
@@ -833,6 +898,75 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
         self.assertIn("tone-polisher", candidate_names)
         self.assertIn("overtrigger-helper", candidate_names)
         self.assertEqual(plan["accuracy_tradeoff"]["expected_accuracy_impact"], "low")
+
+    def test_ablation_plan_can_refresh_stale_existing_cases_with_burden(self) -> None:
+        skills_root = self.tempdir / "skills"
+        write_skill(skills_root, "stale-helper", "Rewrite prompts for clearer task execution.")
+
+        usage_path = self.tempdir / "usage.json"
+        usage_path.write_text(
+            json.dumps([{"name": "stale-helper", "calls": 20, "executions": 1, "false_triggers": 5}]),
+            encoding="utf-8",
+        )
+        ablation_path = self.tempdir / "ablation.jsonl"
+        ablation_path.write_text(
+            "\n".join(
+                json.dumps(
+                    {
+                        "skill": "stale-helper",
+                        "case_id": f"case-{index}",
+                        "with_skill": {"pass": True, "score": 0.8},
+                        "without_skill": {"pass": True, "score": 0.8},
+                        "verdict": "same",
+                    }
+                )
+                for index in range(5)
+            ),
+            encoding="utf-8",
+        )
+        plan_out = self.tempdir / "ablation-plan.json"
+
+        self.run_audit(
+            "--skills-root",
+            str(skills_root),
+            "--usage-file",
+            str(usage_path),
+            "--ablation-file",
+            str(ablation_path),
+            "--ablation-plan-out",
+            str(plan_out),
+        )
+        plan = json.loads(plan_out.read_text(encoding="utf-8"))
+
+        candidate = next(item for item in plan["candidates"] if item["skill"] == "stale-helper")
+        self.assertIn("refresh existing ablation", candidate["priority_reasons"])
+        self.assertIn("prior no-impact ablation", candidate["priority_reasons"])
+
+    def test_ablation_plan_case_counts_are_configurable(self) -> None:
+        skills_root = self.tempdir / "skills"
+        write_skill(skills_root, "case-config-helper", "Rewrite prompts for clearer task execution.")
+        plan_out = self.tempdir / "ablation-plan.json"
+
+        self.run_audit(
+            "--skills-root",
+            str(skills_root),
+            "--ablation-plan-out",
+            str(plan_out),
+            "--ablation-baseline-cases",
+            "12",
+            "--ablation-initial-cases",
+            "2",
+            "--ablation-expand-cases",
+            "4",
+            "--ablation-max-cases",
+            "6",
+        )
+        plan = json.loads(plan_out.read_text(encoding="utf-8"))
+
+        self.assertEqual(plan["case_policy"]["baseline_cases_per_general_skill"], 12)
+        self.assertEqual(plan["case_policy"]["initial_cases_per_candidate"], 2)
+        self.assertEqual(plan["case_policy"]["expand_to_cases"], 4)
+        self.assertEqual(plan["case_policy"]["max_cases_per_candidate"], 6)
 
     def test_structure_only_report_mode_without_evidence_files(self) -> None:
         skills_root = self.tempdir / "skills"

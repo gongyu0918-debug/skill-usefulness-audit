@@ -69,11 +69,11 @@ Examples: Excel, DOCX, PDF, browser automation, deployment, OCR, external API wr
 6. Generate a cost-efficient ablation plan for `general` skills.
    Start with local triage signals instead of full replay.
    Prioritize low final score, high overlap, high quality burden, frequent activation, weak evidence, and missing ablation.
-   Use `--ablation-plan-out` to write the candidate list, pairwise judge protocol, early-stop rules, model-cost estimates, and accuracy tradeoff.
+   Use `--ablation-plan-out` to write the candidate list, pairwise judge protocol, configurable early-stop rules, model-cost estimates, and accuracy tradeoff.
    Run actual replay only for candidates selected by that plan.
 7. Score quality burden.
    Penalize over-triggering with low execution or low ablation impact.
-   Penalize bloated `SKILL.md`, excessive reference loading, hidden reference files, vague resource names, long references without a table of contents, reference/assets dumps, executable assets, private-looking bundled files, script failure, script syntax errors, and repeated agent repair.
+   Penalize bloated `SKILL.md`, excessive reference loading, hidden reference files, vague resource names, long references without a table of contents, reference/assets dumps, executable assets, script count bloat, script maintenance smells, script failure, script syntax errors, and repeated agent repair.
 8. Scan risk and health signals.
    Record risky shell, network, protected-path, persistence, or dynamic-exec patterns.
 9. Load optional community metrics.
@@ -123,6 +123,7 @@ Input contracts:
 - `--ablation-file`: normalized JSON or JSONL with skill-on versus skill-off case results.
 - `--community-file`: optional offline JSON, JSONL, CSV, or TSV registry metrics.
 - `--ablation-plan-out`: optional JSON plan that estimates model cost and narrows ablation to high-value candidates.
+- `--ablation-baseline-cases`, `--ablation-initial-cases`, `--ablation-expand-cases`, `--ablation-max-cases`: optional case-count overrides for the ablation plan.
 
 Run without extra files only when you need a structure-only audit.
 Usage, community, and ablation evidence become lower-confidence in that mode.
@@ -145,6 +146,7 @@ Always include these JSON fields:
 - `report_mode`: `strong-evidence`, `partial-evidence`, or `structure-only`.
 - `score_breakdown`: per-skill usage, uniqueness, impact, community, risk, quality, and confidence details.
 - `quality_penalty`: `0.0-2.0` deduction from `local_score`.
+- `quality_penalty_uncapped`: raw quality burden before the `2.0` cap.
 - `quality_evidence`: concrete burden flags and evidence.
 - `community_breakdown`: registry signal components when community data is present.
 - `ablation_plan`: cost-efficient plan with candidate skills, model-cost estimates, stop rules, and expected accuracy impact.

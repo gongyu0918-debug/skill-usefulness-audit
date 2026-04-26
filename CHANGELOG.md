@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.7
+
+- 修复脚本桩函数 `pass` 未被维护负担检测命中的问题
+- 将大量脚本和脚本异味拆成 `script-count-bloat` 与 `script-maintenance-smell` 两类证据
+- 允许已有 5 个以上消融 case 的高负担 skill 进入复测计划
+- 修复脚本失败率对显式 `executions=0` 的分母处理
+- 改进中英混合上下文估算，中文长说明会更准确触发 prompt burden
+- 新增可配置 ablation case 数量、model-cost unit 说明、`quality_penalty_uncapped`
+
 ## 0.2.6
 
 - 新增质量负担评分，覆盖过度触发、reference/assets 膨胀、脚本失败、重复修补和可疑打包内容

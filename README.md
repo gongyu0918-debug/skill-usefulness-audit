@@ -64,6 +64,8 @@ The tool works with no extra files, but direct evidence gives better results.
 | `--community-file` | JSON, JSONL, CSV, TSV | `rating`, `downloads`, `installs_current`, `installs_all_time`, `trending_7d`, `stars`, `comments_count`, `last_updated` |
 | `--ablation-plan-out` | JSON | cost-efficient ablation plan with candidate skills, early-stop rules, and model-cost estimates |
 
+Planning defaults are `3` initial cases, expand to `5`, cap at `10`, and compare against a `10` case full protocol. Tune them with `--ablation-initial-cases`, `--ablation-expand-cases`, `--ablation-max-cases`, and `--ablation-baseline-cases`.
+
 Duplicate skill names resolve through `path`, `namespace`, and `source`. If an input file only provides a name and that name appears in several installed roots, the report keeps the evidence conservative and adds an `evidence_note`.
 
 ## What It Checks
@@ -71,7 +73,7 @@ Duplicate skill names resolve through `path`, `namespace`, and `source`. If an i
 - Usage: recent calls, all-time calls, active days, last-used date, and evidence source.
 - Overlap: the closest installed peer by instruction and resource fingerprint.
 - Impact: ablation result for general skills; protected-capability scoring for API and tool skills.
-- Ablation planning: triage-only candidates, pairwise judging protocol, early-stop rules, model-cost estimates, and expected reduction versus a 10-case full protocol.
+- Ablation planning: triage-only candidates, pairwise judging protocol, configurable early-stop rules, model-cost estimates, and expected reduction versus a full protocol.
 - Quality burden: over-triggering, high reference loading, bloated SKILL.md, bloated references/assets, weak progressive disclosure, vague resource names, suspicious bundled artifacts, executable assets, script failure and repair burden.
 - Risk: shell execution, network download, persistence hooks, protected path access, dynamic execution, and similar patterns.
 - Community: optional offline registry signals kept separate from local usefulness.
@@ -105,5 +107,5 @@ python codex-skill/scripts/skill_usefulness_audit.py audit \
 
 ```bash
 python scripts/sync_bundle.py
-clawhub publish ./skill --slug skill-usefulness-audit --name "skill-usefulness-audit" --version 0.2.6 --tags latest,audit,skills --changelog "Add quality burden scoring, cost-efficient ablation planning, and model-cost reduction estimates"
+clawhub publish ./skill --slug skill-usefulness-audit --name "skill-usefulness-audit" --version 0.2.7 --tags latest,audit,skills --changelog "Fix script burden detection, refresh stale ablation candidates, and improve mixed-language context estimates"
 ```

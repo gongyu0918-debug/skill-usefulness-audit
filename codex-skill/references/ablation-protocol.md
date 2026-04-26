@@ -29,7 +29,7 @@ The plan uses local evidence first:
 - evidence confidence
 - missing or weak prior ablation
 
-It then estimates model cost against a 10-case full protocol and writes an early-stop plan.
+It then estimates model cost against a full protocol and writes an early-stop plan.
 
 ## Sampling
 
@@ -38,6 +38,13 @@ Choose tasks where the skill should plausibly matter.
 Prefer real user turns over synthetic prompts.
 Expand to `5` cases when the first batch is mixed.
 Expand to `10` cases only for high-impact or deletion-boundary decisions.
+
+Override these defaults with:
+
+- `--ablation-baseline-cases`
+- `--ablation-initial-cases`
+- `--ablation-expand-cases`
+- `--ablation-max-cases`
 
 ## Replay Method
 
@@ -122,6 +129,7 @@ The plan estimates replay cost with three profiles:
 - `coding`: about `50k` model-cost units per case
 
 Each case assumes two replays plus one compact pairwise judge.
+The JSON field `model_cost_estimates.unit` records this as `estimated_context_units_per_case`.
 
 ## Reporting
 
