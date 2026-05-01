@@ -879,10 +879,25 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
 
         bundled = SYNC_MODULE.bundle_frontmatter(source_text, "0.2.8")
 
-        self.assertIn("description: 'Audit installed skills: usage, overlap, and risk. Keep review conservative.", bundled)
+        self.assertIn("Audit installed skills: usage, overlap, and risk. Keep review conservative.", bundled)
         self.assertIn("version: 0.2.8", bundled)
         self.assertIn("tags:", bundled)
         self.assertIn("- audit", bundled)
+
+    def test_sync_bundle_has_yaml_fallback_for_ci(self) -> None:
+        parsed = SYNC_MODULE.fallback_safe_load(
+            "description: >\n"
+            "  Audit installed skills: usage, overlap, and risk.\n"
+            "  Keep review conservative.\n"
+            "tags:\n"
+            "  - audit\n"
+        )
+
+        self.assertEqual(
+            parsed["description"],
+            "Audit installed skills: usage, overlap, and risk. Keep review conservative.",
+        )
+        self.assertEqual(parsed["tags"], ["audit"])
 
     def test_sync_bundle_dry_run_does_not_write_bundle(self) -> None:
         isolated_repo = self.tempdir / "repo"

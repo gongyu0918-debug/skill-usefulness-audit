@@ -10,7 +10,10 @@ import shutil
 import subprocess
 from pathlib import Path
 
-import yaml
+try:
+    import yaml
+except ModuleNotFoundError:
+    yaml = None
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -26,6 +29,85 @@ def read_text(path: Path) -> str:
 def write_text(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
+
+
+def strip_yaml_quotes(value: str) -> str:
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        return value[1:-1]
+    return value
+
+
+def fallback_safe_load(raw_yaml: str) -> dict[str, object]:
+    data: dict[str, object] = {}
+    lines = raw_yaml.splitlines()
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        stripped = line.strip()
+        index += 1
+        if not stripped or stripped.startswith("#"):
+            continue
+        if ":" not in stripped:
+            continue
+        key, raw_value = stripped.split(":", 1)
+        key = key.strip()
+        raw_value = raw_value.strip()
+        if raw_value in {">", "|"}:
+            parts: list[str] = []
+            while index < len(lines) and (lines[index].startswith(" ") or not lines[index].strip()):
+                parts.append(lines[index].strip())
+                index += 1
+            data[key] = "\n".join(part for part in parts if part).replace("\n", " ")
+            continue
+        if raw_value == "":
+            items: list[str] = []
+            while index < len(lines):
+                item_line = lines[index]
+                item_stripped = item_line.strip()
+                if not item_stripped:
+                    index += 1
+                    continue
+                if not item_line.startswith(" ") or not item_stripped.startswith("- "):
+                    break
+                items.append(strip_yaml_quotes(item_stripped[2:]))
+                index += 1
+            data[key] = items
+            continue
+        data[key] = strip_yaml_quotes(raw_value)
+    return data
+
+
+def fallback_safe_dump(data: dict[str, object]) -> str:
+    lines: list[str] = []
+    for key, value in data.items():
+        if isinstance(value, list):
+            lines.append(f"{key}:")
+            for item in value:
+                lines.append(f"- {item}")
+            continue
+        text = str(value)
+        if "\n" in text:
+            lines.append(f"{key}: >")
+            for part in text.splitlines():
+                lines.append(f"  {part}")
+        else:
+            lines.append(f"{key}: {text}")
+    return "\n".join(lines) + "\n"
+
+
+def safe_load_frontmatter(raw_yaml: str) -> dict[str, object]:
+    if yaml is not None:
+        data = yaml.safe_load(raw_yaml) or {}
+    else:
+        data = fallback_safe_load(raw_yaml)
+    if not isinstance(data, dict):
+        raise ValueError("codex-skill/SKILL.md frontmatter must be a mapping")
+    return data
+
+
+def safe_dump_frontmatter(data: dict[str, object]) -> str:
+    return fallback_safe_dump(data)
 
 
 def parse_frontmatter(text: str) -> tuple[dict[str, object], str]:
@@ -45,10 +127,7 @@ def parse_frontmatter(text: str) -> tuple[dict[str, object], str]:
 
     raw_yaml = "".join(lines[1:end_index])
     body = "".join(lines[end_index + 1 :]).lstrip("\r\n")
-    data = yaml.safe_load(raw_yaml) or {}
-    if not isinstance(data, dict):
-        raise ValueError("codex-skill/SKILL.md frontmatter must be a mapping")
-    return data, body
+    return safe_load_frontmatter(raw_yaml), body
 
 
 def bundle_frontmatter(source_text: str, version: str) -> str:
@@ -64,12 +143,7 @@ def bundle_frontmatter(source_text: str, version: str) -> str:
     }
     if homepage:
         output_frontmatter["homepage"] = homepage
-    rendered = yaml.safe_dump(
-        output_frontmatter,
-        allow_unicode=True,
-        default_flow_style=False,
-        sort_keys=False,
-    )
+    rendered = safe_dump_frontmatter(output_frontmatter)
     return "---\n" + rendered + "---\n" + body
 
 
