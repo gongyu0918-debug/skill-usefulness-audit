@@ -3,7 +3,7 @@ name: skill-usefulness-audit
 slug: skill-usefulness-audit
 description: Finds unused, overlapping, risky, or under-evidenced agent skills and
   produces a cleanup report.
-version: 0.2.8
+version: 0.2.9
 tags:
 - audit
 - skills

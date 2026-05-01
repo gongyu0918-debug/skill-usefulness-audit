@@ -692,6 +692,14 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
         self.assertEqual(item["static_risk_level"], "none")
         self.assertEqual(item["static_risk_flags"], [])
 
+    def test_risk_signatures_are_not_concentrated_in_constants_module(self) -> None:
+        constants_path = REPO_ROOT / "codex-skill" / "scripts" / "skill_usefulness_audit_lib" / "constants.py"
+        constants_text = constants_path.read_text(encoding="utf-8")
+
+        self.assertFalse(constants_text.startswith("#!"))
+        self.assertNotIn("external-post", constants_text)
+        self.assertNotIn("base64-payload", constants_text)
+
     def test_scan_skill_reads_skill_markdown_once(self) -> None:
         skills_root = self.tempdir / "skills"
         skill_dir = write_skill(skills_root, "single-read-skill", "Explain usage once.")

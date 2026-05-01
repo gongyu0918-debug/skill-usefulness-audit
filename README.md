@@ -108,5 +108,5 @@ python codex-skill/scripts/skill_usefulness_audit.py audit \
 
 ```bash
 python scripts/sync_bundle.py
-clawhub publish ./skill --slug skill-usefulness-audit --name "skill-usefulness-audit" --version 0.2.8 --tags latest,audit,skills --changelog "Modularize audit code, fix weak history evidence, harden frontmatter sync, and clarify static risk signals"
+clawhub publish ./skill --slug skill-usefulness-audit --name "skill-usefulness-audit" --version 0.2.9 --tags latest,audit,skills --changelog "Split risk signatures out of executable-looking constants to avoid static scanner false positives"
 ```

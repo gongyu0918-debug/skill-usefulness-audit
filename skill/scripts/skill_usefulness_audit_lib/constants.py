@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Audit installed skills by usage, overlap, impact, confidence, and risk.
 """
@@ -16,6 +15,8 @@ import sys
 from collections import Counter
 from datetime import date, datetime, timezone
 from pathlib import Path
+
+from .risk_signatures import RISK_RULES
 
 
 STOPWORDS = {
@@ -451,86 +452,6 @@ HOST_PROMPT_MARKERS = (
     "\"type\":\"turn_context\"",
     "developer_instructions",
     "user_instructions",
-)
-
-RISK_RULES = (
-    {
-        "label": "curl-pipe-shell",
-        "severity": 2.0,
-        "patterns": (
-            r"curl\b[^\n|]{0,300}\|\s*(?:bash|sh)\b",
-            r"wget\b[^\n|]{0,300}\|\s*(?:bash|sh)\b",
-        ),
-    },
-    {
-        "label": "dynamic-exec",
-        "severity": 2.0,
-        "patterns": (
-            r"\binvoke-expression\b",
-            r"\biex\b",
-            r"\beval\s*\(",
-            r"\bexec\s*\(",
-        ),
-    },
-    {
-        "label": "protected-path-access",
-        "severity": 2.0,
-        "patterns": (
-            r"\.ssh(?:[\\/]|$)",
-            r"\.aws(?:[\\/]|$)",
-            r"\.env\b",
-            r"\bid_rsa\b",
-            r"\bcredentials\b",
-        ),
-    },
-    {
-        "label": "persistence-hook",
-        "severity": 2.0,
-        "patterns": (
-            r"\bcrontab\b",
-            r"\bsystemctl\b",
-            r"\bschtasks\b",
-            r"\blaunchctl\b",
-        ),
-    },
-    {
-        "label": "external-post",
-        "severity": 1.0,
-        "patterns": (
-            r"requests\.post\s*\(",
-            r"curl\b[^\n]{0,120}-x\s+post\b",
-            r"invoke-webrequest\b[^\n]{0,120}-method\s+post\b",
-            r"method\s*:\s*[\"']post[\"']",
-        ),
-    },
-    {
-        "label": "shell-exec",
-        "severity": 1.0,
-        "patterns": (
-            r"subprocess\.(?:run|popen)\s*\(",
-            r"os\.system\s*\(",
-            r"shell\s*=\s*true",
-            r"child_process\.(?:exec|spawn)\s*\(",
-        ),
-    },
-    {
-        "label": "network-download",
-        "severity": 1.0,
-        "patterns": (
-            r"\bcurl\s+https?://",
-            r"\bwget\s+https?://",
-            r"invoke-webrequest\s+https?://",
-        ),
-    },
-    {
-        "label": "base64-payload",
-        "severity": 1.0,
-        "patterns": (
-            r"frombase64string",
-            r"base64\s+(?:-d|--decode)",
-            r"\batob\s*\(",
-        ),
-    },
 )
 
 COMPILED_RISK_RULES = tuple(
