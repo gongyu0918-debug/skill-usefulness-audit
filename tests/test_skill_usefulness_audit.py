@@ -120,7 +120,7 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
         self.assertIn("Delete Candidates", result.stdout)
         self.assertIn("tone-polisher", result.stdout)
 
-    def test_history_fallback_counts_mentions(self) -> None:
+    def test_history_fallback_tracks_mentions_as_weak_evidence(self) -> None:
         skills_root = self.tempdir / "skills"
         write_skill(skills_root, "emotion-orchestrator", "Detect emotion and route reply style.")
 
@@ -143,7 +143,8 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
         )
 
         self.assertIn("| 1 | emotion-orchestrator |", result.stdout)
-        self.assertIn("calls=2", result.stdout)
+        self.assertIn("calls=0", result.stdout)
+        self.assertIn("history_mentions=2", result.stdout)
 
     def test_history_fallback_matches_separator_variants(self) -> None:
         skills_root = self.tempdir / "skills"
@@ -168,7 +169,37 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
         )
 
         item = self.first_result(payload, "tone-polisher")
-        self.assertEqual(item["calls"], 3)
+        self.assertEqual(item["calls"], 0)
+        self.assertEqual(item["history_mentions"], 3)
+        self.assertEqual(item["suspected_invocations"], 3)
+        self.assertEqual(item["usage_source"], "history")
+
+    def test_history_mentions_do_not_become_calls(self) -> None:
+        skills_root = self.tempdir / "skills"
+        write_skill(skills_root, "tone-polisher", "Rewrite text with polished tone.")
+
+        history_path = self.tempdir / "history.jsonl"
+        history_path.write_text(
+            "\n".join(
+                [
+                    json.dumps({"role": "user", "text": "上次那个 tone-polisher 不好用，不要再用它。"}),
+                    json.dumps({"role": "assistant", "text": "可以考虑 tone-polisher，但我还没有调用它。"}),
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        payload = self.run_audit_json(
+            "--skills-root",
+            str(skills_root),
+            "--history-file",
+            str(history_path),
+        )
+
+        item = self.first_result(payload, "tone-polisher")
+        self.assertEqual(item["calls"], 0)
+        self.assertEqual(item["history_mentions"], 2)
+        self.assertEqual(item["suspected_invocations"], 2)
         self.assertEqual(item["usage_source"], "history")
 
     def test_nested_usage_with_chinese_keys_is_supported(self) -> None:
@@ -237,7 +268,8 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
             str(history_path),
         )
 
-        self.assertIn("calls=2", result.stdout)
+        self.assertIn("calls=0", result.stdout)
+        self.assertIn("history_mentions=2", result.stdout)
 
     def test_history_fallback_ignores_host_prompt_skill_lists(self) -> None:
         skills_root = self.tempdir / "skills"
@@ -277,7 +309,8 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
         )
 
         item = self.first_result(payload, "frontend-skill")
-        self.assertEqual(item["calls"], 2)
+        self.assertEqual(item["calls"], 0)
+        self.assertEqual(item["history_mentions"], 2)
         self.assertEqual(item["usage_source"], "history")
 
     def test_ablation_with_alias_fields_and_chinese_verdict_is_supported(self) -> None:
@@ -617,8 +650,10 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
 
         item = self.first_result(payload, "network-installer")
         self.assertEqual(item["risk_level"], "high")
+        self.assertEqual(item["static_risk_level"], "high")
         self.assertEqual(item["action"], "quarantine-review")
         self.assertIn("curl-pipe-shell", item["risk_flags"])
+        self.assertIn("curl-pipe-shell", item["static_risk_flags"])
         self.assertIn("protected-path-access", item["risk_flags"])
 
     def test_risk_scan_ignores_documentation_only_markers(self) -> None:
@@ -638,6 +673,24 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
         item = self.first_result(payload, "doc-heavy-skill")
         self.assertEqual(item["risk_level"], "none")
         self.assertEqual(item["risk_flags"], [])
+        self.assertEqual(item["static_risk_level"], "none")
+        self.assertEqual(item["static_risk_flags"], [])
+
+    def test_static_risk_scan_is_heuristic_not_security_proof(self) -> None:
+        skills_root = self.tempdir / "skills"
+        skill_dir = write_skill(skills_root, "obfuscated-runner", "Run local helper scripts.")
+        (skill_dir / "scripts" / "runner.py").write_text(
+            'mod = __import__("sub" + "process")\n'
+            'fn = getattr(mod, "ru" + "n")\n'
+            'fn(["python", "-c", "print(1)"])\n',
+            encoding="utf-8",
+        )
+
+        payload = self.run_audit_json("--skills-root", str(skills_root))
+
+        item = self.first_result(payload, "obfuscated-runner")
+        self.assertEqual(item["static_risk_level"], "none")
+        self.assertEqual(item["static_risk_flags"], [])
 
     def test_scan_skill_reads_skill_markdown_once(self) -> None:
         skills_root = self.tempdir / "skills"
@@ -803,6 +856,43 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
         self.assertIn("version: 0.2.6", bundled)
         self.assertIn("# skill-usefulness-audit", bundled)
 
+    def test_sync_bundle_frontmatter_handles_real_yaml(self) -> None:
+        source_text = (
+            "---\n"
+            "name: skill-usefulness-audit\n"
+            "description: >\n"
+            "  Audit installed skills: usage, overlap, and risk.\n"
+            "  Keep review conservative.\n"
+            "tags:\n"
+            "  - audit\n"
+            "---\n"
+            "# skill-usefulness-audit\n"
+        )
+
+        bundled = SYNC_MODULE.bundle_frontmatter(source_text, "0.2.8")
+
+        self.assertIn("description: 'Audit installed skills: usage, overlap, and risk. Keep review conservative.", bundled)
+        self.assertIn("version: 0.2.8", bundled)
+        self.assertIn("tags:", bundled)
+        self.assertIn("- audit", bundled)
+
+    def test_sync_bundle_dry_run_does_not_write_bundle(self) -> None:
+        isolated_repo = self.tempdir / "repo"
+        shutil.copytree(REPO_ROOT / "codex-skill", isolated_repo / "codex-skill", ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+        (isolated_repo / "scripts").mkdir()
+        shutil.copy2(SYNC_SCRIPT, isolated_repo / "scripts" / "sync_bundle.py")
+        shutil.copy2(REPO_ROOT / "VERSION", isolated_repo / "VERSION")
+
+        subprocess.run(
+            [sys.executable, str(isolated_repo / "scripts" / "sync_bundle.py"), "--dry-run"],
+            cwd=isolated_repo,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+
+        self.assertFalse((isolated_repo / "skill").exists())
+
     def test_sync_bundle_writes_publish_manifest(self) -> None:
         isolated_repo = self.tempdir / "repo"
         shutil.copytree(REPO_ROOT / "codex-skill", isolated_repo / "codex-skill", ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
@@ -825,6 +915,7 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
         self.assertIn(f"version: {CURRENT_VERSION}", bundle_skill)
         self.assertIn("Finds unused, overlapping, risky, or under-evidenced agent skills", bundle_skill)
         self.assertFalse((isolated_repo / "skill" / "scripts" / "__pycache__").exists())
+        self.assertTrue((isolated_repo / "skill" / "scripts" / "skill_usefulness_audit_lib" / "cli.py").exists())
         self.assertEqual(bundle_script, source_script)
 
     def test_markdown_table_escapes_headers(self) -> None:

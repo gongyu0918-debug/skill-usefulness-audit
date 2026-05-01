@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.8
+
+- 将审计入口拆成模块化包，保留原 CLI wrapper 和参数兼容
+- 修复 history fallback 把文本提及计入真实 `calls` 的问题，新增 `history_mentions` 与 `suspected_invocations` 弱证据字段
+- 用 YAML parser 处理发布包 frontmatter，并为同步脚本新增路径护栏与 `--dry-run`
+- 新增 `static_risk_level`、`static_risk_flags` 等兼容字段，强调风险扫描是静态提示而不是安全证明
+- 更新文档，明确 `delete`、`merge-delete`、`quarantine-review` 都是人工复核建议
+
 ## 0.2.7
 
 - 修复脚本桩函数 `pass` 未被维护负担检测命中的问题

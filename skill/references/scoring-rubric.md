@@ -13,10 +13,10 @@ Score each skill with one local 10-point score, one final score, and side signal
 - `impact_score`: `0.0-4.0`
 - `confidence_score`: `0.0-1.0`
 - `community_prior_score`: `0.0-1.0`
-- `risk_level`: `none / low / medium / high`
+- `risk_level` / `static_risk_level`: `none / low / medium / high`
 
-Keep `community_prior_score` and `risk_level` separate from `local_score`.
-Use quality burden, community prior, and risk to shape review priority and final action.
+Keep `community_prior_score` and static risk fields separate from `local_score`.
+Use quality burden, community prior, and static risk hints to shape review priority and final action.
 
 ## 1. Usage Score (`0.0-3.0`)
 
@@ -30,6 +30,13 @@ Use transcript mentions only as weaker fallback evidence.
 - `recent_90d_calls`
 - `last_used_at`
 - `active_days`
+
+History fallback fields:
+
+- `history_mentions`
+- `suspected_invocations`
+
+Transcript mentions are weak evidence only. They may influence the usage score through the history evidence weight, but they must not be reported as direct `calls`.
 - `usage_source`
 - `evidence_weight`
 - `executions`
@@ -67,7 +74,7 @@ Use transcript mentions only as weaker fallback evidence.
 ### Evidence Weight
 
 - `1.00`: direct usage file
-- `0.45`: transcript-history fallback
+- `0.45`: transcript-history fallback based on `suspected_invocations`
 - `0.00`: missing usage evidence
 
 Clamp the final usage score to `0.0-3.0`.
@@ -198,9 +205,10 @@ Use it to rank review priority and benchmark replacements.
 
 Emit `community_breakdown` in JSON so users can see which registry signals contributed.
 
-## 7. Risk Level
+## 7. Static Risk Level
 
 Run static scans against runnable scripts and resource files.
+This is lint-style evidence only. It cannot prove a skill is safe, because indirection, dynamic imports, encoded payloads, aliases, or external downloads can evade simple pattern matching.
 
 Typical flags:
 
@@ -213,7 +221,7 @@ Typical flags:
 - `network-download`
 - `base64-payload`
 
-Risk levels:
+Static risk levels:
 
 - `none`: `0.0`
 - `low`: `0.0 < score < 2.0`
@@ -232,8 +240,8 @@ Use `final_score` for verdict bands.
 
 ## Action Rules
 
-- `high risk`: `quarantine-review`
-- `medium risk + strong final score`: `keep-review-risk`
+- `high static risk`: `quarantine-review`
+- `medium static risk + strong final score`: `keep-review-risk`
 - `high quality burden + strong final score`: `keep-review-burden`
 - `high quality burden + mid final score`: `review-burden`
 - `low confidence + weak final score`: `observe-30d`
@@ -242,5 +250,7 @@ Use `final_score` for verdict bands.
 - `low final score + strong community prior`: `review-vs-community`
 
 Community data shapes review order.
-Risk level shapes safety action.
+Static risk level shapes manual review priority.
 Quality burden turns "useful but expensive" skills into review items.
+
+`delete`, `merge-delete`, and `quarantine-review` are report recommendations only. They are never permission for automatic deletion, isolation, or disabling without human review.

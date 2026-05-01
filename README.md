@@ -2,7 +2,7 @@
 
 Your agent has too many skills. This shows which ones still earn their place.
 
-`skill-usefulness-audit` scans installed agent skills and produces a cleanup report: recent use, overlap, ablation impact, context cost, bundle hygiene, risk flags, confidence, and optional community signals. The output is meant for decisions: keep, review, merge, delete, or quarantine.
+`skill-usefulness-audit` scans installed agent skills and produces a cleanup report: recent use, overlap, ablation impact, context cost, bundle hygiene, static risk flags, confidence, and optional community signals. The output is meant for human-reviewed decisions: keep, review, merge, delete, or quarantine.
 
 ## Quick Start
 
@@ -47,10 +47,11 @@ The Markdown report is for humans. The JSON report is for automation and keeps t
 - `confidence_score`: how much evidence backs the score.
 - `report_mode`: `strong-evidence`, `partial-evidence`, or `structure-only`.
 - `score_breakdown`: per-skill explanation of each score component.
-- `risk_level`: execution-surface risk from scripts and runnable resources.
+- `risk_level` / `static_risk_level`: static execution-surface hints from scripts and runnable resources.
 - `community_prior_score`: optional registry signal for review priority and replacement checks.
+- `history_mentions` / `suspected_invocations`: weak transcript fallback evidence. These do not count as direct `calls`.
 
-Actions are conservative. Low-confidence skills usually go to `observe-30d`. High-risk skills go to `quarantine-review` even when they score well locally.
+Actions are conservative recommendations, not automatic operations. Low-confidence skills usually go to `observe-30d`. High-risk skills go to `quarantine-review` even when they score well locally, and `delete` / `merge-delete` always require manual review before removal.
 
 ## Inputs
 
@@ -59,7 +60,7 @@ The tool works with no extra files, but direct evidence gives better results.
 | Input | Formats | Useful Fields |
 | --- | --- | --- |
 | `--usage-file` | JSON, JSONL, CSV, TSV | `calls`, `recent_30d_calls`, `recent_90d_calls`, `last_used_at`, `active_days`, `executions`, `script_failures`, `repair_turns`, `reference_loads`, `false_triggers`, `path`, `namespace` |
-| `--history-file` | text, JSON, JSONL | transcript text used as weak fallback evidence |
+| `--history-file` | text, JSON, JSONL | transcript text used as weak fallback evidence; mentions are reported separately from direct `calls` |
 | `--ablation-file` | JSON, JSONL | skill-on versus skill-off cases |
 | `--community-file` | JSON, JSONL, CSV, TSV | `rating`, `downloads`, `installs_current`, `installs_all_time`, `trending_7d`, `stars`, `comments_count`, `last_updated` |
 | `--ablation-plan-out` | JSON | cost-efficient ablation plan with candidate skills, early-stop rules, and model-cost estimates |
@@ -70,17 +71,17 @@ Duplicate skill names resolve through `path`, `namespace`, and `source`. If an i
 
 ## What It Checks
 
-- Usage: recent calls, all-time calls, active days, last-used date, and evidence source.
+- Usage: recent calls, all-time calls, active days, last-used date, weak history mentions, and evidence source.
 - Overlap: the closest installed peer by instruction and resource fingerprint.
 - Impact: ablation result for general skills; protected-capability scoring for API and tool skills.
 - Ablation planning: triage-only candidates, pairwise judging protocol, configurable early-stop rules, model-cost estimates, and expected reduction versus a full protocol.
 - Quality burden: over-triggering, high reference loading, bloated SKILL.md, bloated references/assets, weak progressive disclosure, vague resource names, suspicious bundled artifacts, executable assets, script failure and repair burden.
-- Risk: shell execution, network download, persistence hooks, protected path access, dynamic execution, and similar patterns.
+- Static risk hints: shell execution, network download, persistence hooks, protected path access, dynamic execution, and similar patterns. This is lint-style evidence, not a safety proof.
 - Community: optional offline registry signals kept separate from local usefulness.
 
 ## 中文说明
 
-这个 skill 用来清理已经装多了的 agent skills。它会把每个 skill 的使用情况、功能重复、消融收益、上下文成本、reference/assets 负担、脚本维护负担、风险信号、证据置信度放进一份报告，并给出 `keep / review / merge-delete / quarantine-review` 建议。
+这个 skill 用来清理已经装多了的 agent skills。它会把每个 skill 的使用情况、功能重复、消融收益、上下文成本、reference/assets 负担、脚本维护负担、静态风险提示、证据置信度放进一份报告，并给出 `keep / review / merge-delete / quarantine-review` 人工复核建议。
 
 最推荐的用法是先接入真实 usage 数据，再生成 `--ablation-plan-out`，只对候选 general skill 做少量 pairwise 消融。只有历史对话时也能跑，但报告会标成较低置信度。
 
@@ -107,5 +108,5 @@ python codex-skill/scripts/skill_usefulness_audit.py audit \
 
 ```bash
 python scripts/sync_bundle.py
-clawhub publish ./skill --slug skill-usefulness-audit --name "skill-usefulness-audit" --version 0.2.7 --tags latest,audit,skills --changelog "Fix script burden detection, refresh stale ablation candidates, and improve mixed-language context estimates"
+clawhub publish ./skill --slug skill-usefulness-audit --name "skill-usefulness-audit" --version 0.2.8 --tags latest,audit,skills --changelog "Modularize audit code, fix weak history evidence, harden frontmatter sync, and clarify static risk signals"
 ```

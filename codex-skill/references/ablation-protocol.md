@@ -119,6 +119,8 @@ Use `worse` when the skill adds friction, drift, or errors.
 - Expand to `5` when the first batch is mixed.
 - Expand to `10` only for delete-boundary or high-impact decisions.
 
+Delete-boundary means "needs stronger human review evidence", not automatic deletion authority.
+
 ## Model Cost
 
 The audit script does not call an LLM during planning.

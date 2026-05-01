@@ -5,9 +5,12 @@ Sync codex skill sources into the ClawHub bundle.
 
 from __future__ import annotations
 
+import argparse
 import shutil
 import subprocess
 from pathlib import Path
+
+import yaml
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -25,40 +28,49 @@ def write_text(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
-def parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
+def parse_frontmatter(text: str) -> tuple[dict[str, object], str]:
     if not text.startswith("---"):
         raise ValueError("codex-skill/SKILL.md is missing expected frontmatter")
-    parts = text.split("---", 2)
-    if len(parts) < 3:
+    lines = text.splitlines(keepends=True)
+    if not lines or lines[0].strip() != "---":
         raise ValueError("codex-skill/SKILL.md is missing expected frontmatter")
 
-    raw_yaml = parts[1]
-    body = parts[2].lstrip("\r\n")
-    data: dict[str, str] = {}
-    for line in raw_yaml.splitlines():
-        if ":" not in line:
-            continue
-        key, value = line.split(":", 1)
-        data[key.strip()] = value.strip().strip('"').strip("'")
+    end_index = None
+    for index, line in enumerate(lines[1:], start=1):
+        if line.strip() == "---":
+            end_index = index
+            break
+    if end_index is None:
+        raise ValueError("codex-skill/SKILL.md is missing expected frontmatter")
+
+    raw_yaml = "".join(lines[1:end_index])
+    body = "".join(lines[end_index + 1 :]).lstrip("\r\n")
+    data = yaml.safe_load(raw_yaml) or {}
+    if not isinstance(data, dict):
+        raise ValueError("codex-skill/SKILL.md frontmatter must be a mapping")
     return data, body
 
 
 def bundle_frontmatter(source_text: str, version: str) -> str:
     source_frontmatter, body = parse_frontmatter(source_text)
-    description = source_frontmatter.get("description", "")
+    description = str(source_frontmatter.get("description", "") or "")
     homepage = github_homepage()
-    output_lines = [
-        "---",
-        "name: skill-usefulness-audit",
-        "slug: skill-usefulness-audit",
-        f"description: {description}",
-        f"version: {version}",
-        "tags: [audit, skills, ablation, codex, openclaw]",
-    ]
+    output_frontmatter: dict[str, object] = {
+        "name": "skill-usefulness-audit",
+        "slug": "skill-usefulness-audit",
+        "description": description,
+        "version": version,
+        "tags": ["audit", "skills", "ablation", "codex", "openclaw"],
+    }
     if homepage:
-        output_lines.append(f"homepage: {homepage}")
-    output_lines.extend(["---", ""])
-    return "\n".join(output_lines) + body
+        output_frontmatter["homepage"] = homepage
+    rendered = yaml.safe_dump(
+        output_frontmatter,
+        allow_unicode=True,
+        default_flow_style=False,
+        sort_keys=False,
+    )
+    return "---\n" + rendered + "---\n" + body
 
 
 def github_homepage() -> str | None:
@@ -85,14 +97,41 @@ def github_homepage() -> str | None:
     return None
 
 
-def main() -> int:
+def assert_safe_bundle_path() -> None:
+    repo = REPO_ROOT.resolve()
+    source = SOURCE_DIR.resolve()
+    bundle = BUNDLE_DIR.resolve()
+    if not source.is_dir():
+        raise RuntimeError(f"source directory does not exist: {SOURCE_DIR}")
+    if source == bundle:
+        raise RuntimeError("source and bundle directories must differ")
+    if bundle.parent != repo or bundle.name != "skill":
+        raise RuntimeError(f"refusing to sync unexpected bundle path: {BUNDLE_DIR}")
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Sync codex skill sources into the ClawHub bundle.")
+    parser.add_argument("--dry-run", action="store_true", help="Validate and preview sync without writing files.")
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    assert_safe_bundle_path()
+    version = read_text(VERSION_FILE).strip()
+    source_skill = read_text(SOURCE_DIR / "SKILL.md")
+    bundle_skill = bundle_frontmatter(source_skill, version)
+
+    if args.dry_run:
+        print(f"Would sync {SOURCE_DIR} -> {BUNDLE_DIR}")
+        print(f"Would write bundle SKILL.md for version {version} ({len(bundle_skill)} chars)")
+        return 0
+
     if BUNDLE_DIR.exists():
         shutil.rmtree(BUNDLE_DIR)
     shutil.copytree(SOURCE_DIR, BUNDLE_DIR, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
 
-    version = read_text(VERSION_FILE).strip()
-    source_skill = read_text(SOURCE_DIR / "SKILL.md")
-    write_text(BUNDLE_DIR / "SKILL.md", bundle_frontmatter(source_skill, version))
+    write_text(BUNDLE_DIR / "SKILL.md", bundle_skill)
     return 0
 
 

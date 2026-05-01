@@ -1,9 +1,15 @@
 ---
 name: skill-usefulness-audit
 slug: skill-usefulness-audit
-description: Finds unused, overlapping, risky, or under-evidenced agent skills and produces a cleanup report.
-version: 0.2.7
-tags: [audit, skills, ablation, codex, openclaw]
+description: Finds unused, overlapping, risky, or under-evidenced agent skills and
+  produces a cleanup report.
+version: 0.2.8
+tags:
+- audit
+- skills
+- ablation
+- codex
+- openclaw
 homepage: https://github.com/gongyu0918-debug/skill-usefulness-audit
 ---
 # Skill Usefulness Audit
@@ -11,10 +17,10 @@ homepage: https://github.com/gongyu0918-debug/skill-usefulness-audit
 ## Overview
 
 Use this skill to judge whether installed skills still deserve to stay installed.
-It turns vague "this feels useless" opinions into a repeatable audit based on usage evidence, overlap, outcome impact, quality burden, confidence, community prior, and risk.
+It turns vague "this feels useless" opinions into a repeatable audit based on usage evidence, overlap, outcome impact, quality burden, confidence, community prior, and static risk hints.
 
 用这个 skill 判断哪些已安装 skill 还值得保留。
-它把“感觉没用”变成可复现的审计流程，基于使用证据、功能重叠、结果影响、质量负担、证据置信度、社区先验和风险信号来判断。
+它把“感觉没用”变成可复现的审计流程，基于使用证据、功能重叠、结果影响、质量负担、证据置信度、社区先验和静态风险提示来判断。
 
 ## Manual Trigger Only
 
@@ -77,8 +83,8 @@ Examples: Excel, DOCX, PDF, browser automation, deployment, OCR, external API wr
 7. Score quality burden.
    Penalize over-triggering with low execution or low ablation impact.
    Penalize bloated `SKILL.md`, excessive reference loading, hidden reference files, vague resource names, long references without a table of contents, reference/assets dumps, executable assets, script count bloat, script maintenance smells, script failure, script syntax errors, and repeated agent repair.
-8. Scan risk and health signals.
-   Record risky shell, network, protected-path, persistence, or dynamic-exec patterns.
+8. Scan static risk and health signals.
+   Record shell, network, protected-path, persistence, or dynamic-exec patterns as static hints, not as a safety proof.
 9. Load optional community metrics.
    Accept local registry exports through `--community-file`.
    Treat these metrics as external prior, not local proof.
@@ -122,7 +128,7 @@ python scripts/skill_usefulness_audit.py audit \
 Input contracts:
 
 - `--usage-file`: JSON, JSONL, CSV, or TSV with per-skill usage evidence.
-- `--history-file`: raw transcript export used only when direct usage counts are weak or missing.
+- `--history-file`: raw transcript export used only when direct usage counts are weak or missing. Mentions become `history_mentions` / `suspected_invocations`, not direct `calls`.
 - `--ablation-file`: normalized JSON or JSONL with skill-on versus skill-off case results.
 - `--community-file`: optional offline JSON, JSONL, CSV, or TSV registry metrics.
 - `--ablation-plan-out`: optional JSON plan that estimates model cost and narrows ablation to high-value candidates.
@@ -147,7 +153,7 @@ Always return these tables:
 Always include these JSON fields:
 
 - `report_mode`: `strong-evidence`, `partial-evidence`, or `structure-only`.
-- `score_breakdown`: per-skill usage, uniqueness, impact, community, risk, quality, and confidence details.
+- `score_breakdown`: per-skill usage, uniqueness, impact, community, static risk, quality, and confidence details.
 - `quality_penalty`: `0.0-2.0` deduction from `local_score`.
 - `quality_penalty_uncapped`: raw quality burden before the `2.0` cap.
 - `quality_evidence`: concrete burden flags and evidence.
@@ -156,10 +162,11 @@ Always include these JSON fields:
 
 Keep deletion advice conservative for system or host-core skills.
 Recommend narrowing or merging before deletion when two high-overlap skills still serve distinct host integrations.
-Use `quarantine-review` for useful but risky skills.
+Treat `delete`, `merge-delete`, and `quarantine-review` as manual-review recommendations only; never remove or isolate a skill automatically from this report.
 
 ## Resources
 
-- `scripts/skill_usefulness_audit.py`: collect metadata, score skills, scan risk, and render Markdown/JSON tables.
+- `scripts/skill_usefulness_audit.py`: compatibility wrapper for the modular audit package.
+- `scripts/skill_usefulness_audit_lib/`: collect metadata, score skills, scan static risk hints, and render Markdown/JSON tables.
 - `references/scoring-rubric.md`: 10-point scoring rules, confidence logic, community prior, and action thresholds.
 - `references/ablation-protocol.md`: normalized replay method for historical conversation tests.
