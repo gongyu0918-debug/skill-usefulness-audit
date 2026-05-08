@@ -21,6 +21,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SOURCE_DIR = REPO_ROOT / "codex-skill"
 BUNDLE_DIR = REPO_ROOT / "skill"
 VERSION_FILE = REPO_ROOT / "VERSION"
+TEXT_SUFFIXES = {".json", ".md", ".py", ".txt", ".yaml", ".yml"}
 OPENCLAW_NOTICE = """## ClawHub / OpenClaw Edition
 
 This ClawHub bundle is packaged for OpenClaw. Install it from an OpenClaw workspace with:
@@ -40,7 +41,19 @@ def read_text(path: Path) -> str:
 
 def write_text(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
+    path.write_text(text, encoding="utf-8", newline="\n")
+
+
+def normalize_text_tree(root: Path) -> None:
+    for path in root.rglob("*"):
+        if not path.is_file() or path.suffix.lower() not in TEXT_SUFFIXES:
+            continue
+        raw = path.read_bytes()
+        if b"\0" in raw:
+            continue
+        text = raw.decode("utf-8", errors="replace")
+        if "\r" in text:
+            write_text(path, text.replace("\r\n", "\n").replace("\r", "\n"))
 
 
 def strip_yaml_quotes(value: str) -> str:
@@ -234,6 +247,7 @@ def main(argv: list[str] | None = None) -> int:
     if BUNDLE_DIR.exists():
         shutil.rmtree(BUNDLE_DIR)
     shutil.copytree(SOURCE_DIR, BUNDLE_DIR, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    normalize_text_tree(BUNDLE_DIR)
 
     write_text(BUNDLE_DIR / "SKILL.md", bundle_skill)
     return 0

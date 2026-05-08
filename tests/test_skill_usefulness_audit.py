@@ -940,6 +940,9 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
         self.assertIn("slug: skill-usefulness-audit", bundle_skill)
         self.assertIn(f"version: {CURRENT_VERSION}", bundle_skill)
         self.assertIn("Finds unused, overlapping, risky, or under-evidenced agent skills", bundle_skill)
+        for path in (isolated_repo / "skill").rglob("*"):
+            if path.is_file() and path.suffix.lower() in SYNC_MODULE.TEXT_SUFFIXES:
+                self.assertNotIn(b"\r\n", path.read_bytes(), msg=str(path))
         self.assertFalse((isolated_repo / "skill" / "scripts" / "__pycache__").exists())
         self.assertTrue((isolated_repo / "skill" / "scripts" / "skill_usefulness_audit_lib" / "cli.py").exists())
         self.assertEqual(bundle_script, source_script)

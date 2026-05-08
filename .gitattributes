@@ -1,1 +1,4 @@
-skill/SKILL.md text eol=lf
+skill/** text eol=lf
+codex-skill/** text eol=lf
+scripts/*.py text eol=lf
+tests/*.py text eol=lf
