@@ -4,6 +4,8 @@ Your agent has too many skills. This shows which ones still earn their place.
 
 `skill-usefulness-audit` scans installed agent skills and produces a cleanup report: recent use, overlap, ablation impact, context cost, bundle hygiene, static risk flags, confidence, and optional community signals. The output is meant for human-reviewed decisions: keep, review, merge, delete, or quarantine.
 
+The ClawHub package is the OpenClaw-specialized edition. If you need a Codex, Claude Code, or other agent-specific layout, use this GitHub repository instead of the ClawHub bundle.
+
 ## Quick Start
 
 Audit your local Codex skills:
@@ -108,5 +110,5 @@ python codex-skill/scripts/skill_usefulness_audit.py audit \
 
 ```bash
 python scripts/sync_bundle.py
-clawhub publish ./skill --slug skill-usefulness-audit --name "skill-usefulness-audit" --version 0.2.9 --tags latest,audit,skills --changelog "Split risk signatures out of executable-looking constants to avoid static scanner false positives"
+clawhub publish ./skill --slug skill-usefulness-audit --name "skill-usefulness-audit" --version 0.2.10 --tags latest,audit,skills,openclaw --changelog "Specialize the ClawHub bundle for OpenClaw and point other agent users to GitHub"
 ```

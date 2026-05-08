@@ -2,16 +2,25 @@
 name: skill-usefulness-audit
 slug: skill-usefulness-audit
 description: Finds unused, overlapping, risky, or under-evidenced agent skills and produces a cleanup report.
-version: 0.2.9
-tags:
-- audit
-- skills
-- ablation
-- codex
-- openclaw
+version: 0.2.10
+tags: ["audit","skills","ablation","openclaw"]
+user-invocable: true
+disable-model-invocation: true
 homepage: https://github.com/gongyu0918-debug/skill-usefulness-audit
+metadata: {"openclaw":{"skillKey":"skill-usefulness-audit","homepage":"https://github.com/gongyu0918-debug/skill-usefulness-audit"}}
 ---
 # Skill Usefulness Audit
+
+## ClawHub / OpenClaw Edition
+
+This ClawHub bundle is packaged for OpenClaw. Install it from an OpenClaw workspace with:
+
+```bash
+openclaw skills install skill-usefulness-audit
+```
+
+OpenClaw picks up installed workspace skills in the next session. If you need Codex, Claude Code, or another agent-specific version, use the GitHub repository instead: https://github.com/gongyu0918-debug/skill-usefulness-audit
+
 
 ## Overview
 

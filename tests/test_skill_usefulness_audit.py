@@ -881,8 +881,11 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
 
         self.assertIn("Audit installed skills: usage, overlap, and risk. Keep review conservative.", bundled)
         self.assertIn("version: 0.2.8", bundled)
-        self.assertIn("tags:", bundled)
-        self.assertIn("- audit", bundled)
+        self.assertIn('tags: ["audit","skills","ablation","openclaw"]', bundled)
+        self.assertIn("user-invocable: true", bundled)
+        self.assertIn("disable-model-invocation: true", bundled)
+        self.assertIn('metadata: {"openclaw":', bundled)
+        self.assertIn("## ClawHub / OpenClaw Edition", bundled)
 
     def test_sync_bundle_has_yaml_fallback_for_ci(self) -> None:
         parsed = SYNC_MODULE.fallback_safe_load(

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.10
+
+- 将 ClawHub 发布包特化为 OpenClaw 入口，使用单行 frontmatter、OpenClaw metadata 与手动触发标记
+- 在 ClawHub 包说明中标注其他 agent 版本请访问 GitHub 仓库
+
 ## 0.2.9
 
 - 将静态风险检测签名从带 shebang 的 `constants.py` 中拆出，按执行、敏感路径、网络、编码风险分组

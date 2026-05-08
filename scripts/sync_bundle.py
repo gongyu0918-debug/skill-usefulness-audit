@@ -6,6 +6,7 @@ Sync codex skill sources into the ClawHub bundle.
 from __future__ import annotations
 
 import argparse
+import json
 import shutil
 import subprocess
 from pathlib import Path
@@ -20,6 +21,17 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SOURCE_DIR = REPO_ROOT / "codex-skill"
 BUNDLE_DIR = REPO_ROOT / "skill"
 VERSION_FILE = REPO_ROOT / "VERSION"
+OPENCLAW_NOTICE = """## ClawHub / OpenClaw Edition
+
+This ClawHub bundle is packaged for OpenClaw. Install it from an OpenClaw workspace with:
+
+```bash
+openclaw skills install skill-usefulness-audit
+```
+
+OpenClaw picks up installed workspace skills in the next session. If you need Codex, Claude Code, or another agent-specific version, use the GitHub repository instead: https://github.com/gongyu0918-debug/skill-usefulness-audit
+
+"""
 
 
 def read_text(path: Path) -> str:
@@ -81,10 +93,14 @@ def fallback_safe_load(raw_yaml: str) -> dict[str, object]:
 def fallback_safe_dump(data: dict[str, object]) -> str:
     lines: list[str] = []
     for key, value in data.items():
+        if isinstance(value, dict):
+            lines.append(f"{key}: {json.dumps(value, ensure_ascii=True, separators=(',', ':'))}")
+            continue
         if isinstance(value, list):
-            lines.append(f"{key}:")
-            for item in value:
-                lines.append(f"- {item}")
+            lines.append(f"{key}: {json.dumps(value, ensure_ascii=True, separators=(',', ':'))}")
+            continue
+        if isinstance(value, bool):
+            lines.append(f"{key}: {str(value).lower()}")
             continue
         text = str(value)
         if "\n" in text:
@@ -132,19 +148,33 @@ def parse_frontmatter(text: str) -> tuple[dict[str, object], str]:
 
 def bundle_frontmatter(source_text: str, version: str) -> str:
     source_frontmatter, body = parse_frontmatter(source_text)
-    description = str(source_frontmatter.get("description", "") or "")
+    description = " ".join(str(source_frontmatter.get("description", "") or "").split())
     homepage = github_homepage()
     output_frontmatter: dict[str, object] = {
         "name": "skill-usefulness-audit",
         "slug": "skill-usefulness-audit",
         "description": description,
         "version": version,
-        "tags": ["audit", "skills", "ablation", "codex", "openclaw"],
+        "tags": ["audit", "skills", "ablation", "openclaw"],
+        "user-invocable": True,
+        "disable-model-invocation": True,
     }
+    metadata: dict[str, object] = {"openclaw": {"skillKey": "skill-usefulness-audit"}}
     if homepage:
         output_frontmatter["homepage"] = homepage
+        metadata["openclaw"]["homepage"] = homepage
+    output_frontmatter["metadata"] = metadata
     rendered = safe_dump_frontmatter(output_frontmatter)
-    return "---\n" + rendered + "---\n" + body
+    return "---\n" + rendered + "---\n" + inject_openclaw_notice(body)
+
+
+def inject_openclaw_notice(body: str) -> str:
+    if "## ClawHub / OpenClaw Edition" in body:
+        return body
+    lines = body.splitlines(keepends=True)
+    if lines and lines[0].startswith("# "):
+        return lines[0] + "\n" + OPENCLAW_NOTICE + "".join(lines[1:])
+    return OPENCLAW_NOTICE + body
 
 
 def github_homepage() -> str | None:
