@@ -4,7 +4,18 @@ Your agent has too many skills. This shows which ones still earn their place.
 
 `skill-usefulness-audit` scans installed agent skills and produces a cleanup report: recent use, overlap, ablation impact, context cost, bundle hygiene, static risk flags, confidence, and optional community signals. The output is meant for human-reviewed decisions: keep, review, merge, delete, or quarantine.
 
-The ClawHub package is the OpenClaw-specialized edition. If you need a Codex, Claude Code, or other agent-specific layout, use this GitHub repository instead of the ClawHub bundle.
+The skill follows the AgentSkills folder layout used by OpenClaw, Hermes, Claude Code, and Codex. The ClawHub package is still the OpenClaw publishing entry, and the runtime source in `codex-skill/` can be copied into other agents' skills directories.
+
+## Compatibility
+
+| Host | Current fit | Install note |
+| --- | --- | --- |
+| OpenClaw | Native ClawHub bundle with OpenClaw metadata and Python requirement. | Use `openclaw skills install skill-usefulness-audit` or copy `skill/` through your OpenClaw skill workflow. |
+| Hermes | AgentSkills-compatible structure with Hermes metadata and terminal requirement. | Copy the skill contents into `~/.hermes/skills/skill-usefulness-audit/` or a configured external skills directory. |
+| Claude Code | AgentSkills-compatible `SKILL.md`; manual invocation is preferred. | Copy the skill contents into `~/.claude/skills/skill-usefulness-audit/` or `.claude/skills/skill-usefulness-audit/`. |
+| Codex | Existing runtime source remains in `codex-skill/`. | Copy `codex-skill/` into a Codex skills directory or run the script directly from the repo. |
+
+When manually installing into Hermes or Claude Code, keep the target folder name as `skill-usefulness-audit`.
 
 ## Quick Start
 
@@ -13,6 +24,14 @@ Audit your local Codex skills:
 ```bash
 python codex-skill/scripts/skill_usefulness_audit.py audit \
   --skills-root ~/.codex/skills \
+  --markdown-out skill-audit-report.md \
+  --json-out skill-audit-report.json
+```
+
+Audit common OpenClaw, Hermes, Claude Code, and Codex locations with default discovery:
+
+```bash
+python codex-skill/scripts/skill_usefulness_audit.py audit \
   --markdown-out skill-audit-report.md \
   --json-out skill-audit-report.json
 ```
@@ -110,5 +129,5 @@ python codex-skill/scripts/skill_usefulness_audit.py audit \
 
 ```bash
 python scripts/sync_bundle.py
-clawhub publish ./skill --slug skill-usefulness-audit --name "skill-usefulness-audit" --version 0.2.10 --tags latest,audit,skills,openclaw --changelog "Specialize the ClawHub bundle for OpenClaw and point other agent users to GitHub"
+clawhub publish ./skill --slug skill-usefulness-audit --name "skill-usefulness-audit" --version 0.2.11 --tags latest,audit,skills,openclaw,hermes,claude-code --changelog "Add OpenClaw, Hermes, and Claude Code compatibility metadata and discovery defaults"
 ```

@@ -74,21 +74,54 @@ def sorted_files(root: Path) -> list[Path]:
     return sorted((item for item in root.rglob("*") if item.is_file()), key=lambda item: item.as_posix())
 
 
+def strip_yaml_quotes(value: str) -> str:
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        return value[1:-1]
+    return value
+
+
 def parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
-    """Parse flat scalar frontmatter fields used by this skill bundle."""
-    if not text.startswith("---"):
+    """Parse the scalar frontmatter fields needed for skill discovery."""
+    lines = text.splitlines(keepends=True)
+    if not lines or lines[0].strip() != "---":
         return {}, text
-    parts = text.split("---", 2)
-    if len(parts) < 3:
+
+    end_index = None
+    for index, line in enumerate(lines[1:], start=1):
+        if line.strip() == "---":
+            end_index = index
+            break
+    if end_index is None:
         return {}, text
-    raw_yaml = parts[1]
-    body = parts[2].lstrip("\r\n")
+
+    raw_yaml = "".join(lines[1:end_index])
+    body = "".join(lines[end_index + 1 :]).lstrip("\r\n")
     data: dict[str, str] = {}
-    for line in raw_yaml.splitlines():
-        if ":" not in line:
+    yaml_lines = raw_yaml.splitlines()
+    index = 0
+    while index < len(yaml_lines):
+        line = yaml_lines[index]
+        stripped = line.strip()
+        index += 1
+        if not stripped or stripped.startswith("#") or line[:1].isspace():
             continue
-        key, value = line.split(":", 1)
-        data[key.strip()] = value.strip().strip('"').strip("'")
+        if ":" not in stripped:
+            continue
+        key, raw_value = stripped.split(":", 1)
+        key = key.strip()
+        raw_value = raw_value.strip()
+        if raw_value in {">", "|"}:
+            parts: list[str] = []
+            while index < len(yaml_lines) and (yaml_lines[index][:1].isspace() or not yaml_lines[index].strip()):
+                part = yaml_lines[index].strip()
+                if part:
+                    parts.append(part)
+                index += 1
+            data[key] = (" " if raw_value == ">" else "\n").join(parts)
+            continue
+        if raw_value:
+            data[key] = strip_yaml_quotes(raw_value)
     return data, body
 
 
@@ -130,6 +163,15 @@ def guess_namespace(path: Path) -> str:
         cache_index = lowered.index("cache")
         if cache_index + 2 < len(path.parts):
             return normalize_name(path.parts[cache_index + 2])
+    for host_marker, namespace in (
+        (".claude", "claude-code"),
+        (".hermes", "hermes"),
+        (".openclaw", "openclaw"),
+        (".codex", "codex"),
+        (".agents", "agents"),
+    ):
+        if host_marker in lowered:
+            return namespace
     source = guess_source(path)
     if source in {"system", "user"}:
         return source

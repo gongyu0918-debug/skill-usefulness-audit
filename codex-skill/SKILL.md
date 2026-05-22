@@ -1,6 +1,12 @@
 ---
 name: skill-usefulness-audit
-description: Finds unused, overlapping, risky, or under-evidenced agent skills and produces a cleanup report.
+description: Audits installed agent skills for usage, overlap, burden, risk, and missing evidence. Use only when the user asks to audit, clean up, merge, delete, or review skills.
+compatibility: AgentSkills-compatible; tested for Codex, OpenClaw, Hermes, and Claude Code. Requires Python 3.10+ for the bundled audit script.
+tags: ["audit","skills","ablation","agent-skills"]
+user-invocable: true
+disable-model-invocation: true
+argument-hint: "--skills-root PATH --usage-file FILE"
+metadata: {"openclaw":{"requires":{"bins":["python"]}},"hermes":{"category":"devtools","tags":["audit","skills","python"],"requires_toolsets":["terminal"]},"claude_code":{"manual_invocation":true}}
 ---
 
 # Skill Usefulness Audit
@@ -20,6 +26,16 @@ Do not invoke it implicitly during normal task execution.
 
 只在用户手动要求时运行。
 正常任务执行过程中不要隐式触发。
+
+## Host Compatibility
+
+This skill follows the AgentSkills folder layout: `SKILL.md`, `scripts/`, and `references/`.
+Install it in a folder named `skill-usefulness-audit` when the host uses folder names for slash commands or validation.
+
+- Codex: install from `codex-skill/` or copy it into a Codex skills directory.
+- OpenClaw: use the published ClawHub bundle or copy the skill into a loaded `skills/` directory. The publish bundle declares the Python binary requirement.
+- Hermes: install under `~/.hermes/skills/` or a configured external skills directory. The skill requires the terminal toolset to run the bundled Python audit script.
+- Claude Code: install under `~/.claude/skills/skill-usefulness-audit/` or `.claude/skills/skill-usefulness-audit/`. Invoke it manually as `/skill-usefulness-audit`.
 
 ## Audit Scope
 
@@ -52,7 +68,7 @@ Examples: Excel, DOCX, PDF, browser automation, deployment, OCR, external API wr
 
 1. Collect installed skills.
    Search user-provided roots first.
-   Fallback to host-local roots such as `./skills`, `$CODEX_HOME/skills`, or `~/.codex/skills`.
+   Fallback to host-local roots such as `./skills`, `./.agents/skills`, `./.claude/skills`, `$CODEX_HOME/skills`, `~/.codex/skills`, `~/.openclaw/skills`, `~/.agents/skills`, `~/.claude/skills`, or `~/.hermes/skills`.
 2. Collect usage evidence.
    Prefer native counters, logs, or telemetry.
    Read `calls`, `recent_30d_calls`, `recent_90d_calls`, `last_used_at`, and `active_days` when present.
@@ -115,6 +131,9 @@ python scripts/skill_usefulness_audit.py audit \
   --json-out ./skill-audit-report.json \
   --ablation-plan-out ./skill-ablation-plan.json
 ```
+
+When the host exposes the skill directory, prefer an absolute script path.
+For Claude Code, use `${CLAUDE_SKILL_DIR}/scripts/skill_usefulness_audit.py`.
 
 Input contracts:
 

@@ -30,7 +30,7 @@ This ClawHub bundle is packaged for OpenClaw. Install it from an OpenClaw worksp
 openclaw skills install skill-usefulness-audit
 ```
 
-OpenClaw picks up installed workspace skills in the next session. If you need Codex, Claude Code, or another agent-specific version, use the GitHub repository instead: https://github.com/gongyu0918-debug/skill-usefulness-audit
+OpenClaw picks up installed workspace skills in the next session. The same skill follows the AgentSkills layout for Hermes and Claude Code when installed in a folder named `skill-usefulness-audit`.
 
 """
 
@@ -139,6 +139,21 @@ def safe_dump_frontmatter(data: dict[str, object]) -> str:
     return fallback_safe_dump(data)
 
 
+def frontmatter_mapping(value: object) -> dict[str, object]:
+    if isinstance(value, dict):
+        return dict(value)
+    if isinstance(value, str):
+        text = value.strip()
+        if text.startswith("{") and text.endswith("}"):
+            try:
+                parsed = json.loads(text)
+            except json.JSONDecodeError:
+                return {}
+            if isinstance(parsed, dict):
+                return parsed
+    return {}
+
+
 def parse_frontmatter(text: str) -> tuple[dict[str, object], str]:
     if not text.startswith("---"):
         raise ValueError("codex-skill/SKILL.md is missing expected frontmatter")
@@ -162,20 +177,46 @@ def parse_frontmatter(text: str) -> tuple[dict[str, object], str]:
 def bundle_frontmatter(source_text: str, version: str) -> str:
     source_frontmatter, body = parse_frontmatter(source_text)
     description = " ".join(str(source_frontmatter.get("description", "") or "").split())
+    compatibility = " ".join(str(source_frontmatter.get("compatibility", "") or "").split())
     homepage = github_homepage()
+    source_metadata = frontmatter_mapping(source_frontmatter.get("metadata"))
+    metadata: dict[str, object] = {
+        "openclaw": {
+            "skillKey": "skill-usefulness-audit",
+            "requires": {"bins": ["python"]},
+        },
+        "hermes": {
+            "category": "devtools",
+            "tags": ["audit", "skills", "python"],
+            "requires_toolsets": ["terminal"],
+        },
+        "claude_code": {
+            "manual_invocation": True,
+        },
+    }
+    for key, value in source_metadata.items():
+        if isinstance(value, dict) and isinstance(metadata.get(key), dict):
+            merged = dict(metadata[key])  # type: ignore[arg-type]
+            merged.update(value)
+            metadata[key] = merged
+        else:
+            metadata[key] = value
     output_frontmatter: dict[str, object] = {
         "name": "skill-usefulness-audit",
         "slug": "skill-usefulness-audit",
         "description": description,
         "version": version,
-        "tags": ["audit", "skills", "ablation", "openclaw"],
+        "compatibility": compatibility,
+        "tags": ["audit", "skills", "ablation", "openclaw", "hermes", "claude-code"],
         "user-invocable": True,
         "disable-model-invocation": True,
+        "argument-hint": "--skills-root PATH --usage-file FILE",
     }
-    metadata: dict[str, object] = {"openclaw": {"skillKey": "skill-usefulness-audit"}}
     if homepage:
         output_frontmatter["homepage"] = homepage
-        metadata["openclaw"]["homepage"] = homepage
+        openclaw_metadata = metadata.setdefault("openclaw", {})
+        if isinstance(openclaw_metadata, dict):
+            openclaw_metadata["homepage"] = homepage
     output_frontmatter["metadata"] = metadata
     rendered = safe_dump_frontmatter(output_frontmatter)
     return "---\n" + rendered + "---\n" + inject_openclaw_notice(body)

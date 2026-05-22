@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -560,6 +561,39 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
         self.assertGreaterEqual(item["resource_metrics"]["skill_context_units"], 5000)
         self.assertIn("prompt-bloat", item["quality_flags"])
 
+    def test_scan_skill_parses_folded_frontmatter_description(self) -> None:
+        skill_dir = self.tempdir / "folded-frontmatter"
+        skill_dir.mkdir()
+        (skill_dir / "SKILL.md").write_text(
+            "---\n"
+            "name: folded-frontmatter\n"
+            "description: >\n"
+            "  Use browser automation\n"
+            "  to inspect PDF reports.\n"
+            "---\n\n"
+            "# Folded Frontmatter\n",
+            encoding="utf-8",
+        )
+
+        skill = AUDIT_MODULE.scan_skill(skill_dir / "SKILL.md")
+
+        self.assertEqual(skill["description"], "Use browser automation to inspect PDF reports.")
+        self.assertEqual(AUDIT_MODULE.classify_skill(skill), "tool")
+
+    def test_scan_skill_ignores_python_cache_files_for_script_count(self) -> None:
+        skills_root = self.tempdir / "skills"
+        skill_dir = write_skill(skills_root, "cache-clean-helper", "Run one local helper.")
+        (skill_dir / "scripts" / "run.py").write_text("print('ok')\n", encoding="utf-8")
+        pycache = skill_dir / "scripts" / "__pycache__"
+        pycache.mkdir()
+        (pycache / "run.cpython-311.pyc").write_bytes(b"\0\0cache")
+
+        payload = self.run_audit_json("--skills-root", str(skills_root))
+
+        item = self.first_result(payload, "cache-clean-helper")
+        self.assertEqual(item["resource_metrics"]["scripts_count"], 1)
+        self.assertNotIn("script-count-bloat", item["quality_flags"])
+
     def test_reference_disclosure_ignores_short_generic_stem_mentions(self) -> None:
         root = self.tempdir / "skill"
         reference = root / "references" / "api.md"
@@ -700,6 +734,13 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
         self.assertNotIn("external-post", constants_text)
         self.assertNotIn("base64-payload", constants_text)
 
+    def test_audit_skill_risk_definitions_do_not_flag_self(self) -> None:
+        skill = AUDIT_MODULE.scan_skill(REPO_ROOT / "codex-skill" / "SKILL.md")
+
+        self.assertEqual(skill["risk_level"], "none")
+        self.assertEqual(skill["risk_flags"], [])
+        self.assertLess(skill["resource_metrics"]["scripts_count"], 20)
+
     def test_scan_skill_reads_skill_markdown_once(self) -> None:
         skills_root = self.tempdir / "skills"
         skill_dir = write_skill(skills_root, "single-read-skill", "Explain usage once.")
@@ -838,6 +879,33 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
 
         self.assertNotEqual(normalized_upper, normalized_lower)
 
+    def test_default_roots_include_common_agent_skill_locations(self) -> None:
+        workspace = self.tempdir / "workspace"
+        home = self.tempdir / "home"
+        codex_home = self.tempdir / "codex-home"
+        expected = [
+            workspace / "skills",
+            workspace / ".agents" / "skills",
+            workspace / ".claude" / "skills",
+            codex_home / "skills",
+            home / ".codex" / "skills",
+            home / ".openclaw" / "skills",
+            home / ".agents" / "skills",
+            home / ".claude" / "skills",
+            home / ".hermes" / "skills",
+        ]
+        for path in expected:
+            path.mkdir(parents=True, exist_ok=True)
+
+        with (
+            mock.patch.object(AUDIT_MODULE.Path, "cwd", return_value=workspace),
+            mock.patch.object(AUDIT_MODULE.Path, "home", return_value=home),
+            mock.patch.dict(os.environ, {"CODEX_HOME": str(codex_home)}),
+        ):
+            roots = AUDIT_MODULE.default_roots()
+
+        self.assertEqual(roots, [path.resolve() for path in expected])
+
     def test_merge_community_record_uses_deterministic_rating(self) -> None:
         store: dict[str, dict[str, object]] = {}
         AUDIT_MODULE.merge_community_record(store, "example", {"rating": 4.2})
@@ -881,10 +949,13 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
 
         self.assertIn("Audit installed skills: usage, overlap, and risk. Keep review conservative.", bundled)
         self.assertIn("version: 0.2.8", bundled)
-        self.assertIn('tags: ["audit","skills","ablation","openclaw"]', bundled)
+        self.assertIn('tags: ["audit","skills","ablation","openclaw","hermes","claude-code"]', bundled)
         self.assertIn("user-invocable: true", bundled)
         self.assertIn("disable-model-invocation: true", bundled)
+        self.assertIn("argument-hint: --skills-root PATH --usage-file FILE", bundled)
         self.assertIn('metadata: {"openclaw":', bundled)
+        self.assertIn('"hermes":', bundled)
+        self.assertIn('"claude_code":', bundled)
         self.assertIn("## ClawHub / OpenClaw Edition", bundled)
 
     def test_sync_bundle_has_yaml_fallback_for_ci(self) -> None:
@@ -939,7 +1010,9 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
         bundle_script = (isolated_repo / "skill" / "scripts" / "skill_usefulness_audit.py").read_text(encoding="utf-8")
         self.assertIn("slug: skill-usefulness-audit", bundle_skill)
         self.assertIn(f"version: {CURRENT_VERSION}", bundle_skill)
-        self.assertIn("Finds unused, overlapping, risky, or under-evidenced agent skills", bundle_skill)
+        self.assertIn("Audits installed agent skills for usage, overlap, burden, risk, and missing evidence", bundle_skill)
+        self.assertIn('"requires":{"bins":["python"]}', bundle_skill)
+        self.assertIn('"requires_toolsets":["terminal"]', bundle_skill)
         for path in (isolated_repo / "skill").rglob("*"):
             if path.is_file() and path.suffix.lower() in SYNC_MODULE.TEXT_SUFFIXES:
                 self.assertNotIn(b"\r\n", path.read_bytes(), msg=str(path))

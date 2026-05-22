@@ -2,20 +2,48 @@ from __future__ import annotations
 
 from .common import *
 
-def scan_risk(root: Path, self_relative_path: Path | None = None) -> dict[str, object]:
+def is_generated_python_cache(path: Path) -> bool:
+    return "__pycache__" in {part.lower() for part in path.parts} or path.suffix.lower() in {".pyc", ".pyo"}
+
+
+def normalized_relative_path(root: Path, path: Path) -> str:
+    return path.relative_to(root).as_posix()
+
+
+def audit_definition_relative_paths() -> set[str]:
+    base = Path("scripts") / "skill_usefulness_audit_lib"
+    return {
+        (base / "constants.py").as_posix(),
+        (base / "risk_signatures.py").as_posix(),
+        (base / "risk_signatures_encoding.py").as_posix(),
+        (base / "risk_signatures_execution.py").as_posix(),
+        (base / "risk_signatures_network.py").as_posix(),
+        (base / "risk_signatures_sensitive.py").as_posix(),
+    }
+
+
+def scan_risk(
+    root: Path,
+    self_relative_path: Path | None = None,
+    ignored_relative_paths: set[str] | None = None,
+) -> dict[str, object]:
     hits: dict[str, dict[str, object]] = {}
+    ignored_paths = set(ignored_relative_paths or set())
+    if self_relative_path is not None:
+        ignored_paths.add(self_relative_path.as_posix())
     for path in root.rglob("*"):
         if not path.is_file():
             continue
-        if "__pycache__" in path.parts:
+        if is_generated_python_cache(path):
             continue
         relative_path = path.relative_to(root)
+        relative = relative_path.as_posix()
+        if relative in ignored_paths:
+            continue
         relative_parts = {part.lower() for part in relative_path.parts}
         if "references" in relative_parts:
             continue
         if path.name == "SKILL.md":
-            continue
-        if self_relative_path is not None and relative_path == self_relative_path:
             continue
         if path.suffix.lower() not in RISK_SCAN_SUFFIXES:
             continue
@@ -27,7 +55,6 @@ def scan_risk(root: Path, self_relative_path: Path | None = None) -> dict[str, o
         except OSError:
             continue
         text = read_text(path).lower()
-        relative = str(relative_path)
         for rule in COMPILED_RISK_RULES:
             if any(pattern.search(text) for pattern in rule["patterns"]):
                 hit = hits.setdefault(
@@ -411,12 +438,14 @@ def scan_skill(skill_md: Path) -> dict[str, object]:
     description = frontmatter.get("description", "")
     headings = [line.lstrip("# ").strip() for line in body.splitlines() if line.startswith("#")]
     scripts_dir = root / "scripts"
-    script_paths = sorted_files(scripts_dir)
+    script_paths = [path for path in sorted_files(scripts_dir) if not is_generated_python_cache(path)]
     self_relative_path = current_script_relative_to(root)
+    ignored_relative_paths = audit_definition_relative_paths() if name == "skill-usefulness-audit" else set()
     quality_script_paths = [
         path
         for path in script_paths
         if self_relative_path is None or path.relative_to(root) != self_relative_path
+        if normalized_relative_path(root, path) not in ignored_relative_paths
     ]
     reference_metrics = resource_metrics(root, "references")
     asset_metrics = resource_metrics(root, "assets")
@@ -425,7 +454,7 @@ def scan_skill(skill_md: Path) -> dict[str, object]:
     fingerprint = " ".join(
         [name, description, " ".join(headings), " ".join(script_files), " ".join(reference_files)]
     )
-    risk = scan_risk(root, self_relative_path=self_relative_path)
+    risk = scan_risk(root, self_relative_path=self_relative_path, ignored_relative_paths=ignored_relative_paths)
     quality = scan_static_quality(root, description, body, quality_script_paths, reference_metrics, asset_metrics)
     return {
         "name": name,
@@ -474,11 +503,36 @@ def discover_skill_files(roots: list[Path], include_system: bool) -> list[Path]:
 
 def default_roots() -> list[Path]:
     roots: list[Path] = []
-    cwd_skills = Path.cwd() / "skills"
-    if cwd_skills.exists():
-        roots.append(cwd_skills)
+    seen: set[str] = set()
+
+    def append_if_exists(path: Path) -> None:
+        if not path.exists():
+            return
+        resolved = path.resolve()
+        key = os.path.normcase(str(resolved))
+        if key in seen:
+            return
+        seen.add(key)
+        roots.append(resolved)
+
+    cwd = Path.cwd()
+    for candidate in (
+        cwd / "skills",
+        cwd / ".agents" / "skills",
+        cwd / ".claude" / "skills",
+    ):
+        append_if_exists(candidate)
+
+    home = Path.home()
     codex_home = os.environ.get("CODEX_HOME")
-    home_skills = Path(codex_home).expanduser() / "skills" if codex_home else Path.home() / ".codex" / "skills"
-    if home_skills.exists():
-        roots.append(home_skills)
+    if codex_home:
+        append_if_exists(Path(codex_home).expanduser() / "skills")
+    for candidate in (
+        home / ".codex" / "skills",
+        home / ".openclaw" / "skills",
+        home / ".agents" / "skills",
+        home / ".claude" / "skills",
+        home / ".hermes" / "skills",
+    ):
+        append_if_exists(candidate)
     return roots

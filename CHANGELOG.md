@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.11
+
+- 增加 OpenClaw、Hermes、Claude Code 的 skill metadata 与安装说明
+- 默认扫描位置扩展到常见的 Codex、OpenClaw、Hermes、Claude Code skill 目录
+- 修复多行 frontmatter description、Python 缓存文件计数和自审风险误报问题
+
 ## 0.2.10
 
 - 将 ClawHub 发布包特化为 OpenClaw 入口，使用单行 frontmatter、OpenClaw metadata 与手动触发标记
