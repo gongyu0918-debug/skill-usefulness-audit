@@ -14,12 +14,82 @@ def audit_definition_relative_paths() -> set[str]:
     base = Path("scripts") / "skill_usefulness_audit_lib"
     return {
         (base / "constants.py").as_posix(),
+        (base / "reporting.py").as_posix(),
         (base / "risk_signatures.py").as_posix(),
         (base / "risk_signatures_encoding.py").as_posix(),
         (base / "risk_signatures_execution.py").as_posix(),
         (base / "risk_signatures_network.py").as_posix(),
         (base / "risk_signatures_sensitive.py").as_posix(),
+        (base / "risk_quality.py").as_posix(),
     }
+
+
+def add_risk_hit(hits: dict[str, dict[str, object]], label: str, severity: float, relative: str) -> None:
+    hit = hits.setdefault(label, {"severity": severity, "files": []})
+    hit["severity"] = max(float(hit["severity"]), severity)
+    files = hit["files"]
+    if isinstance(files, list) and relative not in files and len(files) < 3:
+        files.append(relative)
+
+
+def python_exec_call_labels(text: str) -> set[str]:
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return set()
+
+    subprocess_aliases = {"subprocess"}
+    os_aliases = {"os"}
+    subprocess_call_names: set[str] = set()
+    labels: set[str] = set()
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == "subprocess":
+                    subprocess_aliases.add(alias.asname or alias.name)
+                if alias.name == "os":
+                    os_aliases.add(alias.asname or alias.name)
+        elif isinstance(node, ast.ImportFrom) and node.module == "subprocess":
+            for alias in node.names:
+                if alias.name in {"run", "Popen", "call", "check_call", "check_output"}:
+                    subprocess_call_names.add(alias.asname or alias.name)
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if isinstance(func, ast.Name):
+            if func.id in subprocess_call_names:
+                labels.add("script-exec-call")
+            elif func.id in {"eval", "exec"}:
+                labels.add("dynamic-exec")
+        elif isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
+            if func.value.id in subprocess_aliases and func.attr in {"run", "Popen", "call", "check_call", "check_output"}:
+                labels.add("script-exec-call")
+            elif func.value.id in os_aliases and func.attr == "system":
+                labels.add("script-exec-call")
+    return labels
+
+
+def install_surface_labels(path: Path, relative: str, text: str) -> set[str]:
+    labels: set[str] = set()
+    name = path.name.lower()
+    if name == "package.json":
+        try:
+            payload = json.loads(text)
+        except json.JSONDecodeError:
+            payload = {}
+        scripts = payload.get("scripts") if isinstance(payload, dict) else None
+        if isinstance(scripts, dict) and any(key in scripts for key in INSTALL_LIFECYCLE_SCRIPT_KEYS):
+            labels.add("install-hook")
+    elif name == "setup.py":
+        labels.add("packaging-exec-surface")
+    elif name == "pyproject.toml" and re.search(r"(?m)^\s*build-backend\s*=", text):
+        labels.add("packaging-exec-surface")
+    elif relative.startswith(".github/workflows/") and re.search(r"(?m)^\s*run\s*:", text):
+        labels.add("ci-automation-surface")
+    return labels
 
 
 def scan_risk(
@@ -57,13 +127,14 @@ def scan_risk(
         text = read_text(path).lower()
         for rule in COMPILED_RISK_RULES:
             if any(pattern.search(text) for pattern in rule["patterns"]):
-                hit = hits.setdefault(
-                    str(rule["label"]),
-                    {"severity": float(rule["severity"]), "files": []},
-                )
-                files = hit["files"]
-                if isinstance(files, list) and relative not in files and len(files) < 3:
-                    files.append(relative)
+                add_risk_hit(hits, str(rule["label"]), float(rule["severity"]), relative)
+        if path.suffix.lower() == ".py":
+            for label in python_exec_call_labels(read_text(path)):
+                severity = 2.0 if label == "dynamic-exec" else 1.0
+                add_risk_hit(hits, label, severity, relative)
+        for label in install_surface_labels(path, relative, read_text(path)):
+            severity = 2.0 if label == "install-hook" else 1.0
+            add_risk_hit(hits, label, severity, relative)
 
     risk_score = round(sum(float(item["severity"]) for item in hits.values()), 2)
     if risk_score >= 4.0:
@@ -190,6 +261,23 @@ def python_syntax_error_files(root: Path, files: list[Path]) -> list[str]:
         except SyntaxError:
             matches.append(relative_label(root, path))
     return matches
+
+
+def private_content_files(root: Path, files: list[Path]) -> tuple[list[str], dict[str, int]]:
+    matches: list[str] = []
+    labels: dict[str, int] = {}
+    for path in files:
+        if path.suffix.lower() not in TEXT_FILE_SUFFIXES or file_size(path) > MAX_SCAN_BYTES:
+            continue
+        text = read_text(path)
+        file_matched = False
+        for label, pattern in PRIVATE_CONTENT_PATTERNS:
+            if pattern.search(text):
+                labels[label] = labels.get(label, 0) + 1
+                file_matched = True
+        if file_matched:
+            matches.append(relative_label(root, path))
+    return matches, labels
 
 
 def scan_static_quality(
@@ -353,6 +441,24 @@ def scan_static_quality(
                 "bundle contains files that look private or environment-specific",
                 files=private_paths[:8],
                 metrics={"matches": len(private_paths)},
+            )
+        )
+
+    private_content_paths, private_content_labels = private_content_files(
+        root,
+        script_files + asset_files + reference_files,
+    )
+    if private_content_paths:
+        evidence.append(
+            quality_issue(
+                "private-content-artifact",
+                0.60,
+                "bundle contains content that looks like private credentials or keys",
+                files=private_content_paths[:8],
+                metrics={
+                    "matches": len(private_content_paths),
+                    "signal_types": sorted(private_content_labels),
+                },
             )
         )
 

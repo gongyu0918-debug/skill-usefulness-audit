@@ -91,7 +91,7 @@ Examples: Excel, DOCX, PDF, browser automation, deployment, OCR, external API wr
    Penalize over-triggering with low execution or low ablation impact.
    Penalize bloated `SKILL.md`, excessive reference loading, hidden reference files, vague resource names, long references without a table of contents, reference/assets dumps, executable assets, script count bloat, script maintenance smells, script failure, script syntax errors, and repeated agent repair.
 8. Scan static risk and health signals.
-   Record shell, network, protected-path, persistence, or dynamic-exec patterns as static hints, not as a safety proof.
+   Record shell, network, install-hook, packaging, protected-path, persistence, dynamic-exec, or private-content patterns as static hints, not as a safety proof.
 9. Load optional community metrics.
    Accept local registry exports through `--community-file`.
    Treat these metrics as external prior, not local proof.
@@ -169,6 +169,7 @@ Always include these JSON fields:
 - `quality_evidence`: concrete burden flags and evidence.
 - `community_breakdown`: registry signal components when community data is present.
 - `ablation_plan`: cost-efficient plan with candidate skills, model-cost estimates, stop rules, and expected accuracy impact.
+- `risk_review`: concise human review guidance for any static risk flags.
 
 Keep deletion advice conservative for system or host-core skills.
 Recommend narrowing or merging before deletion when two high-overlap skills still serve distinct host integrations.

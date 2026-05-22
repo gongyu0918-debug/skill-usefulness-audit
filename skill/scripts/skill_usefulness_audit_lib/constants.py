@@ -399,6 +399,7 @@ RISK_SCAN_SUFFIXES = {
     "",
     ".cfg",
     ".ini",
+    ".json",
     ".js",
     ".jsx",
     ".ps1",
@@ -411,7 +412,7 @@ RISK_SCAN_SUFFIXES = {
     ".yml",
 }
 
-RISK_SCAN_DIRS = {"scripts", "resources", "bin", "hooks"}
+RISK_SCAN_DIRS = {"scripts", "resources", "bin", "hooks", ".github", "workflows"}
 
 MAX_SCAN_BYTES = 512 * 1024
 HISTORY_EVIDENCE_WEIGHT = 0.45
@@ -519,3 +520,23 @@ PRIVATE_BUNDLE_NAME_PATTERNS = tuple(
 )
 
 EXECUTABLE_ASSET_SUFFIXES = {".bat", ".cmd", ".com", ".dll", ".dylib", ".exe", ".msi", ".scr", ".so"}
+
+INSTALL_LIFECYCLE_SCRIPT_KEYS = {
+    "preinstall",
+    "install",
+    "postinstall",
+    "prepublish",
+    "prepare",
+}
+
+PRIVATE_CONTENT_PATTERNS = tuple(
+    (label, re.compile(pattern, re.IGNORECASE))
+    for label, pattern in (
+        ("private-key-block", r"-----BEGIN [A-Z ]{0,30}PRIVATE KEY-----"),
+        (
+            "credential-assignment",
+            r"\b(?:api|access|auth|refresh|session)[_-]?(?:token|key|secret)\b\s*[:=]\s*['\"]?[A-Za-z0-9_./+=-]{24,}",
+        ),
+        ("cloud-access-id", r"\bA[SK]IA[0-9A-Z]{16}\b"),
+    )
+)

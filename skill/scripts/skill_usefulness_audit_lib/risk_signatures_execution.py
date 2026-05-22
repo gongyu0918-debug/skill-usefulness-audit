@@ -21,16 +21,6 @@ EXECUTION_RISK_RULES = (
         ),
     },
     {
-        "label": "persistence-hook",
-        "severity": 2.0,
-        "patterns": (
-            r"\bcrontab\b",
-            r"\bsystemctl\b",
-            r"\bschtasks\b",
-            r"\blaunchctl\b",
-        ),
-    },
-    {
         "label": "shell-exec",
         "severity": 1.0,
         "patterns": (

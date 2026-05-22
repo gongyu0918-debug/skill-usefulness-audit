@@ -30,7 +30,9 @@ This ClawHub bundle is packaged for OpenClaw. Install it from an OpenClaw worksp
 openclaw skills install skill-usefulness-audit
 ```
 
-OpenClaw picks up installed workspace skills in the next session. The same skill follows the AgentSkills layout for Hermes and Claude Code when installed in a folder named `skill-usefulness-audit`.
+OpenClaw picks up installed workspace skills in the next session. For other agent hosts, use the GitHub repository instead: https://github.com/gongyu0918-debug/skill-usefulness-audit
+
+本 ClawHub 包是 OpenClaw 专用发布包。其他 agent 版本请访问 GitHub 仓库：https://github.com/gongyu0918-debug/skill-usefulness-audit
 
 """
 
@@ -177,37 +179,23 @@ def parse_frontmatter(text: str) -> tuple[dict[str, object], str]:
 def bundle_frontmatter(source_text: str, version: str) -> str:
     source_frontmatter, body = parse_frontmatter(source_text)
     description = " ".join(str(source_frontmatter.get("description", "") or "").split())
-    compatibility = " ".join(str(source_frontmatter.get("compatibility", "") or "").split())
     homepage = github_homepage()
-    source_metadata = frontmatter_mapping(source_frontmatter.get("metadata"))
     metadata: dict[str, object] = {
         "openclaw": {
             "skillKey": "skill-usefulness-audit",
             "requires": {"bins": ["python"]},
         },
-        "hermes": {
-            "category": "devtools",
-            "tags": ["audit", "skills", "python"],
-            "requires_toolsets": ["terminal"],
-        },
-        "claude_code": {
-            "manual_invocation": True,
-        },
     }
-    for key, value in source_metadata.items():
-        if isinstance(value, dict) and isinstance(metadata.get(key), dict):
-            merged = dict(metadata[key])  # type: ignore[arg-type]
-            merged.update(value)
-            metadata[key] = merged
-        else:
-            metadata[key] = value
+    source_metadata = frontmatter_mapping(source_frontmatter.get("metadata"))
+    source_openclaw = source_metadata.get("openclaw")
+    if isinstance(source_openclaw, dict):
+        metadata["openclaw"].update(source_openclaw)  # type: ignore[union-attr]
     output_frontmatter: dict[str, object] = {
         "name": "skill-usefulness-audit",
         "slug": "skill-usefulness-audit",
         "description": description,
         "version": version,
-        "compatibility": compatibility,
-        "tags": ["audit", "skills", "ablation", "openclaw", "hermes", "claude-code"],
+        "tags": ["audit", "skills", "ablation", "openclaw"],
         "user-invocable": True,
         "disable-model-invocation": True,
         "argument-hint": "--skills-root PATH --usage-file FILE",
@@ -219,7 +207,137 @@ def bundle_frontmatter(source_text: str, version: str) -> str:
             openclaw_metadata["homepage"] = homepage
     output_frontmatter["metadata"] = metadata
     rendered = safe_dump_frontmatter(output_frontmatter)
-    return "---\n" + rendered + "---\n" + inject_openclaw_notice(body)
+    return "---\n" + rendered + "---\n" + inject_openclaw_notice(openclaw_body(body))
+
+
+def openclaw_body(body: str) -> str:
+    body = strip_host_compatibility(body)
+    body = body.replace(
+        "   Fallback to host-local roots such as `./skills`, `./.agents/skills`, `./.claude/skills`, `$CODEX_HOME/skills`, `~/.codex/skills`, `~/.openclaw/skills`, `~/.agents/skills`, `~/.claude/skills`, or `~/.hermes/skills`.",
+        "   Fallback to OpenClaw-local roots such as `./skills`, `./.agents/skills`, `~/.openclaw/skills`, or `~/.agents/skills`.",
+    )
+    body = body.replace(
+        "\nWhen the host exposes the skill directory, prefer an absolute script path.\nFor Claude Code, use `${CLAUDE_SKILL_DIR}/scripts/skill_usefulness_audit.py`.\n",
+        "\nWhen the host exposes the skill directory, prefer an absolute script path.\n",
+    )
+    return body
+
+
+def strip_host_compatibility(body: str) -> str:
+    lines = body.splitlines(keepends=True)
+    output: list[str] = []
+    skipping = False
+    for line in lines:
+        if line.startswith("## Host Compatibility"):
+            skipping = True
+            continue
+        if skipping and line.startswith("## "):
+            skipping = False
+        if not skipping:
+            output.append(line)
+    return "".join(output)
+
+
+def replace_required(text: str, old: str, new: str, path: Path) -> str:
+    if old not in text:
+        raise RuntimeError(f"expected OpenClaw bundle override target not found in {path}")
+    return text.replace(old, new)
+
+
+def apply_openclaw_script_overrides(bundle_dir: Path) -> None:
+    common_path = bundle_dir / "scripts" / "skill_usefulness_audit_lib" / "common.py"
+    common_text = read_text(common_path)
+    common_text = replace_required(
+        common_text,
+        """    for host_marker, namespace in (
+        (".claude", "claude-code"),
+        (".hermes", "hermes"),
+        (".openclaw", "openclaw"),
+        (".codex", "codex"),
+        (".agents", "agents"),
+    ):
+""",
+        """    for host_marker, namespace in (
+        (".openclaw", "openclaw"),
+        (".agents", "agents"),
+    ):
+""",
+        common_path,
+    )
+    write_text(common_path, common_text)
+
+    risk_quality_path = bundle_dir / "scripts" / "skill_usefulness_audit_lib" / "risk_quality.py"
+    risk_quality_text = read_text(risk_quality_path)
+    risk_quality_text = replace_required(
+        risk_quality_text,
+        """def default_roots() -> list[Path]:
+    roots: list[Path] = []
+    seen: set[str] = set()
+
+    def append_if_exists(path: Path) -> None:
+        if not path.exists():
+            return
+        resolved = path.resolve()
+        key = os.path.normcase(str(resolved))
+        if key in seen:
+            return
+        seen.add(key)
+        roots.append(resolved)
+
+    cwd = Path.cwd()
+    for candidate in (
+        cwd / "skills",
+        cwd / ".agents" / "skills",
+        cwd / ".claude" / "skills",
+    ):
+        append_if_exists(candidate)
+
+    home = Path.home()
+    codex_home = os.environ.get("CODEX_HOME")
+    if codex_home:
+        append_if_exists(Path(codex_home).expanduser() / "skills")
+    for candidate in (
+        home / ".codex" / "skills",
+        home / ".openclaw" / "skills",
+        home / ".agents" / "skills",
+        home / ".claude" / "skills",
+        home / ".hermes" / "skills",
+    ):
+        append_if_exists(candidate)
+    return roots
+""",
+        """def default_roots() -> list[Path]:
+    roots: list[Path] = []
+    seen: set[str] = set()
+
+    def append_if_exists(path: Path) -> None:
+        if not path.exists():
+            return
+        resolved = path.resolve()
+        key = os.path.normcase(str(resolved))
+        if key in seen:
+            return
+        seen.add(key)
+        roots.append(resolved)
+
+    cwd = Path.cwd()
+    for candidate in (
+        cwd / "skills",
+        cwd / ".agents" / "skills",
+    ):
+        append_if_exists(candidate)
+
+    home = Path.home()
+    for candidate in (
+        home / ".openclaw" / "skills",
+        home / ".agents" / "skills",
+    ):
+        append_if_exists(candidate)
+    return roots
+""",
+        risk_quality_path,
+    )
+    write_text(risk_quality_path, risk_quality_text)
 
 
 def inject_openclaw_notice(body: str) -> str:
@@ -289,6 +407,7 @@ def main(argv: list[str] | None = None) -> int:
         shutil.rmtree(BUNDLE_DIR)
     shutil.copytree(SOURCE_DIR, BUNDLE_DIR, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
     normalize_text_tree(BUNDLE_DIR)
+    apply_openclaw_script_overrides(BUNDLE_DIR)
 
     write_text(BUNDLE_DIR / "SKILL.md", bundle_skill)
     return 0

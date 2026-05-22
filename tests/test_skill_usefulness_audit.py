@@ -495,6 +495,22 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
         self.assertIn("executable-asset", item["quality_flags"])
         self.assertEqual(item["resource_metrics"]["assets_count"], 2)
 
+    def test_static_quality_flags_private_content_without_echoing_value(self) -> None:
+        skills_root = self.tempdir / "skills"
+        skill_dir = write_skill(skills_root, "private-content-helper", "Use for focused local checks.")
+        marker = "abcdefghijklmnopqrstuvwxyz1234567890"
+        (skill_dir / "assets").mkdir(exist_ok=True)
+        (skill_dir / "assets" / "config.txt").write_text(
+            f"access_token = \"{marker}\"\n",
+            encoding="utf-8",
+        )
+
+        payload = self.run_audit_json("--skills-root", str(skills_root))
+
+        item = self.first_result(payload, "private-content-helper")
+        self.assertIn("private-content-artifact", item["quality_flags"])
+        self.assertNotIn(marker, json.dumps(item, ensure_ascii=False))
+
     def test_static_quality_burden_flags_disclosure_gap_vague_names_and_bad_python(self) -> None:
         skills_root = self.tempdir / "skills"
         skill_dir = write_skill(
@@ -690,6 +706,35 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
         self.assertIn("curl-pipe-shell", item["static_risk_flags"])
         self.assertIn("protected-path-access", item["risk_flags"])
 
+    def test_risk_scan_flags_install_hook_surface(self) -> None:
+        skills_root = self.tempdir / "skills"
+        skill_dir = write_skill(skills_root, "install-hook-helper", "Use for package checks.")
+        (skill_dir / "package.json").write_text(
+            json.dumps({"scripts": {"postinstall": "node scripts/setup.js"}}),
+            encoding="utf-8",
+        )
+
+        payload = self.run_audit_json("--skills-root", str(skills_root))
+
+        item = self.first_result(payload, "install-hook-helper")
+        self.assertEqual(item["risk_level"], "medium")
+        self.assertIn("install-hook", item["risk_flags"])
+        self.assertIn("Install-time hooks", item["risk_review"])
+
+    def test_risk_scan_uses_python_ast_for_alias_exec_calls(self) -> None:
+        skills_root = self.tempdir / "skills"
+        skill_dir = write_skill(skills_root, "alias-runner", "Run local helper scripts.")
+        (skill_dir / "scripts" / "runner.py").write_text(
+            "import subprocess as sp\nsp.run(['python', '-c', 'print(1)'])\n",
+            encoding="utf-8",
+        )
+
+        payload = self.run_audit_json("--skills-root", str(skills_root))
+
+        item = self.first_result(payload, "alias-runner")
+        self.assertIn("script-exec-call", item["risk_flags"])
+        self.assertIn("child process", item["risk_review"])
+
     def test_risk_scan_ignores_documentation_only_markers(self) -> None:
         skills_root = self.tempdir / "skills"
         write_skill(
@@ -709,6 +754,26 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
         self.assertEqual(item["risk_flags"], [])
         self.assertEqual(item["static_risk_level"], "none")
         self.assertEqual(item["static_risk_flags"], [])
+
+    def test_markdown_report_includes_risk_review_section(self) -> None:
+        skills_root = self.tempdir / "skills"
+        skill_dir = write_skill(skills_root, "install-hook-helper", "Use for package checks.")
+        (skill_dir / "package.json").write_text(
+            json.dumps({"scripts": {"install": "node scripts/setup.js"}}),
+            encoding="utf-8",
+        )
+        markdown_out = self.tempdir / "report.md"
+
+        self.run_audit(
+            "--skills-root",
+            str(skills_root),
+            "--markdown-out",
+            str(markdown_out),
+        )
+
+        report = markdown_out.read_text(encoding="utf-8")
+        self.assertIn("## Risk Review", report)
+        self.assertIn("install-hook", report)
 
     def test_static_risk_scan_is_heuristic_not_security_proof(self) -> None:
         skills_root = self.tempdir / "skills"
@@ -949,14 +1014,19 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
 
         self.assertIn("Audit installed skills: usage, overlap, and risk. Keep review conservative.", bundled)
         self.assertIn("version: 0.2.8", bundled)
-        self.assertIn('tags: ["audit","skills","ablation","openclaw","hermes","claude-code"]', bundled)
+        self.assertIn('tags: ["audit","skills","ablation","openclaw"]', bundled)
         self.assertIn("user-invocable: true", bundled)
         self.assertIn("disable-model-invocation: true", bundled)
         self.assertIn("argument-hint: --skills-root PATH --usage-file FILE", bundled)
         self.assertIn('metadata: {"openclaw":', bundled)
-        self.assertIn('"hermes":', bundled)
-        self.assertIn('"claude_code":', bundled)
+        self.assertNotIn('"hermes":', bundled)
+        self.assertNotIn('"claude_code":', bundled)
         self.assertIn("## ClawHub / OpenClaw Edition", bundled)
+        self.assertNotIn("## Host Compatibility", bundled)
+        self.assertNotIn("Hermes", bundled)
+        self.assertNotIn("Claude Code", bundled)
+        self.assertNotIn("~/.hermes/skills", bundled)
+        self.assertNotIn("~/.claude/skills", bundled)
 
     def test_sync_bundle_has_yaml_fallback_for_ci(self) -> None:
         parsed = SYNC_MODULE.fallback_safe_load(
@@ -1012,13 +1082,51 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
         self.assertIn(f"version: {CURRENT_VERSION}", bundle_skill)
         self.assertIn("Audits installed agent skills for usage, overlap, burden, risk, and missing evidence", bundle_skill)
         self.assertIn('"requires":{"bins":["python"]}', bundle_skill)
-        self.assertIn('"requires_toolsets":["terminal"]', bundle_skill)
+        self.assertNotIn('"requires_toolsets":["terminal"]', bundle_skill)
+        self.assertNotIn("Hermes", bundle_skill)
+        self.assertNotIn("Claude Code", bundle_skill)
+        self.assertNotIn("## Host Compatibility", bundle_skill)
+        self.assertNotIn("~/.hermes/skills", bundle_skill)
+        self.assertNotIn("~/.claude/skills", bundle_skill)
+        bundle_text_parts = []
         for path in (isolated_repo / "skill").rglob("*"):
             if path.is_file() and path.suffix.lower() in SYNC_MODULE.TEXT_SUFFIXES:
+                bundle_text_parts.append(path.read_text(encoding="utf-8"))
                 self.assertNotIn(b"\r\n", path.read_bytes(), msg=str(path))
+        bundle_text = "\n".join(bundle_text_parts)
+        for forbidden in (
+            "Hermes",
+            "Claude",
+            "claude-code",
+            "requires_toolsets",
+            ".hermes",
+            ".claude",
+            ".codex",
+            "CODEX_HOME",
+            "schtasks",
+            "crontab",
+            "systemctl",
+            "launchctl",
+        ):
+            self.assertNotIn(forbidden, bundle_text)
         self.assertFalse((isolated_repo / "skill" / "scripts" / "__pycache__").exists())
         self.assertTrue((isolated_repo / "skill" / "scripts" / "skill_usefulness_audit_lib" / "cli.py").exists())
         self.assertEqual(bundle_script, source_script)
+
+        write_skill(isolated_repo / "skills", "openclaw-local-helper", "Audit local OpenClaw skills.")
+        subprocess.run(
+            [
+                sys.executable,
+                str(isolated_repo / "skill" / "scripts" / "skill_usefulness_audit.py"),
+                "audit",
+                "--json-out",
+                str(isolated_repo / "openclaw-default-roots.json"),
+            ],
+            cwd=isolated_repo,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
 
     def test_markdown_table_escapes_headers(self) -> None:
         table = AUDIT_MODULE.markdown_table(["A|B"], [["1|2"]])

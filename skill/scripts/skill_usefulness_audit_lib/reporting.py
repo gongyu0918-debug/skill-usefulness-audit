@@ -3,10 +3,36 @@ from __future__ import annotations
 from .common import *
 from .scoring import *
 
+RISK_REVIEW_GUIDANCE = {
+    "base64-payload": "Decoded payloads can hide behavior; review the decoded content before trusting the skill.",
+    "curl-pipe-shell": "Downloaded code is executed immediately; verify the source and prefer pinned local scripts.",
+    "dynamic-exec": "Dynamic execution makes behavior harder to audit; check whether it is required.",
+    "external-post": "The skill may send data out; confirm the destination and data type.",
+    "install-hook": "Install-time hooks can run before the user invokes the skill; inspect the hook body.",
+    "network-download": "The skill downloads remote content; confirm it is pinned and trusted.",
+    "packaging-exec-surface": "Packaging files can execute local build code; inspect before installing.",
+    "protected-path-access": "The skill references private local paths; review whether that access is necessary.",
+    "script-exec-call": "The script invokes a child process; inspect the called command and arguments.",
+}
+
+
 def short_risk_flags(flags: list[str]) -> str:
     if not flags:
         return ""
     return ",".join(flags[:2])
+
+
+def risk_review_summary(level: str, evidence: list[dict[str, object]]) -> str:
+    if not evidence:
+        return ""
+    labels = [str(item.get("label", "")) for item in evidence if item.get("label")]
+    guidance = [RISK_REVIEW_GUIDANCE.get(label, "Review this signal before trusting the skill.") for label in labels[:3]]
+    prefix = {
+        "high": "High risk: review before use.",
+        "medium": "Medium risk: inspect before trusting.",
+        "low": "Low risk: check if expected.",
+    }.get(level, "Review recommended.")
+    return f"{prefix} " + " ".join(dict.fromkeys(guidance))
 
 
 def build_basis(

@@ -164,10 +164,7 @@ def guess_namespace(path: Path) -> str:
         if cache_index + 2 < len(path.parts):
             return normalize_name(path.parts[cache_index + 2])
     for host_marker, namespace in (
-        (".claude", "claude-code"),
-        (".hermes", "hermes"),
         (".openclaw", "openclaw"),
-        (".codex", "codex"),
         (".agents", "agents"),
     ):
         if host_marker in lowered:

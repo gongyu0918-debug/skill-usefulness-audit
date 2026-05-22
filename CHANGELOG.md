@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.12
+
+- 新增轻量安装入口、Python 调用关系和私密内容提示，不扩展破坏性命令字面规则
+- Markdown 与 JSON 报告增加风险复核说明，帮助人工判断风险信号
+- 增加旧版对比样本验证，确认新版不把冗长或安慰剂类 skill 误判为执行风险
+- 保持 ClawHub 发布包为 OpenClaw 特化版本，其他 agent 只在 GitHub 仓库说明中维护
+
 ## 0.2.11
 
 - 增加 OpenClaw、Hermes、Claude Code 的 skill metadata 与安装说明

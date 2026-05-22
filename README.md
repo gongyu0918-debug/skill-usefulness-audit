@@ -97,7 +97,7 @@ Duplicate skill names resolve through `path`, `namespace`, and `source`. If an i
 - Impact: ablation result for general skills; protected-capability scoring for API and tool skills.
 - Ablation planning: triage-only candidates, pairwise judging protocol, configurable early-stop rules, model-cost estimates, and expected reduction versus a full protocol.
 - Quality burden: over-triggering, high reference loading, bloated SKILL.md, bloated references/assets, weak progressive disclosure, vague resource names, suspicious bundled artifacts, executable assets, script failure and repair burden.
-- Static risk hints: shell execution, network download, persistence hooks, protected path access, dynamic execution, and similar patterns. This is lint-style evidence, not a safety proof.
+- Static risk hints: shell execution, install hooks, packaging execution surfaces, network download, protected path access, private-looking bundled content, dynamic execution, and similar patterns. This is lint-style evidence, not a safety proof.
 - Community: optional offline registry signals kept separate from local usefulness.
 
 ## 中文说明
@@ -129,5 +129,5 @@ python codex-skill/scripts/skill_usefulness_audit.py audit \
 
 ```bash
 python scripts/sync_bundle.py
-clawhub publish ./skill --slug skill-usefulness-audit --name "skill-usefulness-audit" --version 0.2.11 --tags latest,audit,skills,openclaw,hermes,claude-code --changelog "Add OpenClaw, Hermes, and Claude Code compatibility metadata and discovery defaults"
+clawhub publish ./skill --slug skill-usefulness-audit --name "skill-usefulness-audit" --version 0.2.12 --tags latest,audit,skills,openclaw --changelog "Add lightweight risk review checks and keep the ClawHub bundle OpenClaw-specific"
 ```

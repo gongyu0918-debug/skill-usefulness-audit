@@ -79,6 +79,7 @@ def run_audit(args: argparse.Namespace) -> int:
             evidence_notes.append(f"community={community_note}")
         community_prior, community_conf, community_breakdown = community_prior_score(community_entry)
         evidence_note = " | ".join(dict.fromkeys(evidence_notes)) if evidence_notes else None
+        risk_review = risk_review_summary(str(skill["risk_level"]), list(skill["risk_evidence"]))  # type: ignore[arg-type]
 
         u_score = usage_score(usage_record, evidence_weight)
         uniq_score = uniqueness_score(best_overlap)
@@ -210,6 +211,7 @@ def run_audit(args: argparse.Namespace) -> int:
                 "risk_score": skill["risk_score"],
                 "risk_flags": skill["risk_flags"],
                 "risk_evidence": skill["risk_evidence"],
+                "risk_review": risk_review,
                 "static_risk_level": skill["static_risk_level"],
                 "static_risk_score": skill["static_risk_score"],
                 "static_risk_flags": skill["static_risk_flags"],
@@ -396,6 +398,29 @@ def run_audit(args: argparse.Namespace) -> int:
                 "## Quality Burden",
                 "",
                 markdown_table(["Skill", "Burden", "Flags", "Evidence"], quality_rows),
+            ]
+        )
+
+    risk_rows = []
+    for item in ranked:
+        if str(item["risk_level"]) == "none":
+            continue
+        risk_rows.append(
+            [
+                str(item["display_name"]),
+                str(item["risk_level"]),
+                short_risk_flags(list(item["risk_flags"])),
+                str(item["risk_review"]),
+            ]
+        )
+
+    if risk_rows:
+        report_parts.extend(
+            [
+                "",
+                "## Risk Review",
+                "",
+                markdown_table(["Skill", "Risk", "Flags", "Review"], risk_rows),
             ]
         )
 
