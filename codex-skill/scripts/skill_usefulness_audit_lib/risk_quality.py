@@ -330,6 +330,25 @@ def scan_static_quality(
             )
         )
 
+    if description_units >= 120:
+        evidence.append(
+            quality_issue(
+                "description-bloat",
+                0.25,
+                "frontmatter description is too long for a routing trigger",
+                metrics={"description_context_units": description_units},
+            )
+        )
+    elif description_units >= 60:
+        evidence.append(
+            quality_issue(
+                "description-bloat",
+                0.10,
+                "frontmatter description is longer than a concise routing trigger",
+                metrics={"description_context_units": description_units},
+            )
+        )
+
     if reference_count >= 3:
         linked_reference_count = sum(
             1 for path in reference_files if reference_is_directly_disclosed(body_lower, root, path)

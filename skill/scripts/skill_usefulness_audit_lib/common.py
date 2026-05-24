@@ -174,7 +174,6 @@ def guess_namespace(path: Path) -> str:
         return source
     return "other"
 
-
 def parse_dateish(value) -> date | None:
     if value is None or value == "":
         return None

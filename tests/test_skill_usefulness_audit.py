@@ -533,6 +533,92 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
         self.assertIn("vague-resource-names", item["quality_flags"])
         self.assertIn("script-syntax-error", item["quality_flags"])
 
+    def test_useless_duplicate_skill_gets_delete_recommendation(self) -> None:
+        skills_root = self.tempdir / "skills"
+        write_skill(skills_root, "unused-answer-polisher", "Rewrite answers with polished tone.")
+        write_skill(skills_root, "unused-tone-polisher", "Rewrite answers with polished tone.")
+
+        usage_path = self.tempdir / "usage.json"
+        usage_path.write_text(
+            json.dumps(
+                [
+                    {"name": "unused-answer-polisher", "calls": 0},
+                    {"name": "unused-tone-polisher", "calls": 0},
+                ]
+            ),
+            encoding="utf-8",
+        )
+        ablation_path = self.tempdir / "ablation.json"
+        ablation_path.write_text(
+            json.dumps(
+                [
+                    {
+                        "skill": "unused-answer-polisher",
+                        "with_skill": {"pass": True, "score": 0.80},
+                        "without_skill": {"pass": True, "score": 0.80},
+                        "verdict": "same",
+                    },
+                    {
+                        "skill": "unused-tone-polisher",
+                        "with_skill": {"pass": True, "score": 0.80},
+                        "without_skill": {"pass": True, "score": 0.80},
+                        "verdict": "same",
+                    },
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        payload = self.run_audit_json(
+            "--skills-root",
+            str(skills_root),
+            "--usage-file",
+            str(usage_path),
+            "--ablation-file",
+            str(ablation_path),
+        )
+
+        item = self.first_result(payload, "unused-answer-polisher")
+        self.assertLess(item["final_score"], 3.0)
+        self.assertEqual(item["action"], "delete")
+        self.assertTrue(item["delete_candidate"])
+        self.assertIn("same=1.00", item["basis"])
+
+    def test_pseudo_skills_lower_scores_for_description_script_and_reference_burden(self) -> None:
+        skills_root = self.tempdir / "skills"
+        long_description = " ".join(["Use for focused release verification workflow"] * 40)
+        write_skill(skills_root, "verbose-description-helper", long_description)
+
+        broken_script = write_skill(skills_root, "broken-script-helper", "Run focused local validation helpers.")
+        (broken_script / "scripts" / "broken.py").write_text("def broken(:\n    return 1\n", encoding="utf-8")
+
+        messy_refs = write_skill(
+            skills_root,
+            "messy-reference-helper",
+            "Use for focused reference checks.",
+            extra_body="Load the exact supporting file only when needed.",
+        )
+        long_reference = "\n".join(f"undifferentiated note {index}" for index in range(120))
+        for index in range(5):
+            (messy_refs / "references" / f"file{index}.md").write_text(long_reference, encoding="utf-8")
+
+        payload = self.run_audit_json("--skills-root", str(skills_root))
+
+        expected_flags = {
+            "verbose-description-helper": {"description-bloat"},
+            "broken-script-helper": {"script-syntax-error"},
+            "messy-reference-helper": {
+                "reference-disclosure-gap",
+                "long-reference-without-toc",
+                "vague-resource-names",
+            },
+        }
+        for name, flags in expected_flags.items():
+            item = self.first_result(payload, name)
+            self.assertLess(item["final_score"], item["local_score"], msg=name)
+            self.assertGreater(item["quality_penalty"], 0.0, msg=name)
+            self.assertTrue(flags.issubset(set(item["quality_flags"])), msg=name)
+
     def test_script_pass_smell_matches_non_final_lines(self) -> None:
         skills_root = self.tempdir / "skills"
         skill_dir = write_skill(skills_root, "stub-helper", "Run local helper scripts.")
@@ -1153,6 +1239,8 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
         self.assertEqual(item["score_breakdown"]["usage"]["calls"], 3)
         self.assertIn("community", item["score_breakdown"])
         self.assertIn("quality", item["score_breakdown"])
+        self.assertIn("action_advice", item)
+        self.assertTrue(item["action_advice"].endswith("."))
         self.assertEqual(item["final_score"], item["local_score"])
 
     def test_ablation_plan_prioritizes_candidates_and_estimates_cost_savings(self) -> None:

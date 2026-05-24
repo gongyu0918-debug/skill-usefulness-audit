@@ -70,6 +70,7 @@ The Markdown report is for humans. The JSON report is for automation and keeps t
 - `score_breakdown`: per-skill explanation of each score component.
 - `risk_level` / `static_risk_level`: static execution-surface hints from scripts and runnable resources.
 - `community_prior_score`: optional registry signal for review priority and replacement checks.
+- `action_advice`: plain-language recommendation for the human reviewer.
 - `history_mentions` / `suspected_invocations`: weak transcript fallback evidence. These do not count as direct `calls`.
 
 Actions are conservative recommendations, not automatic operations. Low-confidence skills usually go to `observe-30d`. High-risk skills go to `quarantine-review` even when they score well locally, and `delete` / `merge-delete` always require manual review before removal.
@@ -96,7 +97,7 @@ Duplicate skill names resolve through `path`, `namespace`, and `source`. If an i
 - Overlap: the closest installed peer by instruction and resource fingerprint.
 - Impact: ablation result for general skills; protected-capability scoring for API and tool skills.
 - Ablation planning: triage-only candidates, pairwise judging protocol, configurable early-stop rules, model-cost estimates, and expected reduction versus a full protocol.
-- Quality burden: over-triggering, high reference loading, bloated SKILL.md, bloated references/assets, weak progressive disclosure, vague resource names, suspicious bundled artifacts, executable assets, script failure and repair burden.
+- Quality burden: over-triggering, high reference loading, bloated SKILL.md, overlong descriptions, bloated references/assets, weak progressive disclosure, vague resource names, suspicious bundled artifacts, executable assets, script failure and repair burden.
 - Static risk hints: shell execution, install hooks, packaging execution surfaces, network download, protected path access, private-looking bundled content, dynamic execution, and similar patterns. This is lint-style evidence, not a safety proof.
 - Community: optional offline registry signals kept separate from local usefulness.
 
@@ -129,5 +130,5 @@ python codex-skill/scripts/skill_usefulness_audit.py audit \
 
 ```bash
 python scripts/sync_bundle.py
-clawhub publish ./skill --slug skill-usefulness-audit --name "skill-usefulness-audit" --version 0.2.12 --tags latest,audit,skills,openclaw --changelog "Add lightweight risk review checks and keep the ClawHub bundle OpenClaw-specific"
+clawhub publish ./skill --slug skill-usefulness-audit --name "skill-usefulness-audit" --version 0.2.13 --tags latest,audit,skills,openclaw --changelog "Trim audit skill docs, add reference contents, plain-language action advice, sync hardening, and pseudo-skill regression tests"
 ```

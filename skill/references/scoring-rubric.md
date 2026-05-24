@@ -2,6 +2,19 @@
 
 Score each skill with one local 10-point score, one final score, and side signals.
 
+## Contents
+
+- Core Outputs
+- Usage Score
+- Uniqueness Score
+- Impact Score
+- Confidence Score
+- Quality Penalty
+- Community Prior Score
+- Static Risk Level
+- Verdict Bands
+- Action Rules
+
 ## Core Outputs
 
 - `local_score = usage_score + uniqueness_score + impact_score`
@@ -172,6 +185,7 @@ Use direct usage logs when available:
 Scan installed skill files:
 
 - add `0.20-0.40` for large `SKILL.md` bodies
+- add `0.10-0.25` for frontmatter descriptions that are too long for concise routing
 - add `0.25` for broad trigger language in the frontmatter description
 - add `0.20-0.30` when reference files are not directly disclosed from `SKILL.md`
 - add `0.25-0.50` for large reference sets or heavy reference text

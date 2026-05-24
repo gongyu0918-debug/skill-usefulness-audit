@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.13
+
+- 精简运行时 skill 说明，减少自审时的文档负担
+- 给 scoring 与 ablation reference 补充目录，避免长 reference 被标记为缺少导览
+- 报告增加面向用户的 `action_advice`，让推荐动作更直白
+- 改进 ClawHub 发布包同步逻辑，降低后续代码调整时的同步脆弱性
+- 增加伪技能回归测试，覆盖无用重复技能、过长 description、坏 Python 脚本和混乱 reference
+
 ## 0.2.12
 
 - 新增轻量安装入口、Python 调用关系和私密内容提示，不扩展破坏性命令字面规则

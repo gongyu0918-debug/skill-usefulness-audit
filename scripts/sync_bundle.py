@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -238,29 +239,40 @@ def strip_host_compatibility(body: str) -> str:
     return "".join(output)
 
 
-def replace_required(text: str, old: str, new: str, path: Path) -> str:
-    if old not in text:
-        raise RuntimeError(f"expected OpenClaw bundle override target not found in {path}")
-    return text.replace(old, new)
+def replace_top_level_function(text: str, name: str, replacement: str, path: Path) -> str:
+    pattern = re.compile(rf"^def {re.escape(name)}\(.*?(?=^def |\Z)", re.MULTILINE | re.DOTALL)
+    def render(match: re.Match[str]) -> str:
+        suffix = "\n" if match.end() == len(text) else "\n\n"
+        return replacement.rstrip() + suffix
+
+    updated, count = pattern.subn(render, text, count=1)
+    if count != 1:
+        raise RuntimeError(f"expected function {name} not found in {path}")
+    return updated
 
 
 def apply_openclaw_script_overrides(bundle_dir: Path) -> None:
     common_path = bundle_dir / "scripts" / "skill_usefulness_audit_lib" / "common.py"
     common_text = read_text(common_path)
-    common_text = replace_required(
+    common_text = replace_top_level_function(
         common_text,
-        """    for host_marker, namespace in (
-        (".claude", "claude-code"),
-        (".hermes", "hermes"),
+        "guess_namespace",
+        """def guess_namespace(path: Path) -> str:
+    lowered = [part.lower() for part in path.parts]
+    if "plugins" in lowered and "cache" in lowered:
+        cache_index = lowered.index("cache")
+        if cache_index + 2 < len(path.parts):
+            return normalize_name(path.parts[cache_index + 2])
+    for host_marker, namespace in (
         (".openclaw", "openclaw"),
-        (".codex", "codex"),
         (".agents", "agents"),
     ):
-""",
-        """    for host_marker, namespace in (
-        (".openclaw", "openclaw"),
-        (".agents", "agents"),
-    ):
+        if host_marker in lowered:
+            return namespace
+    source = guess_source(path)
+    if source in {"system", "user"}:
+        return source
+    return "other"
 """,
         common_path,
     )
@@ -268,44 +280,9 @@ def apply_openclaw_script_overrides(bundle_dir: Path) -> None:
 
     risk_quality_path = bundle_dir / "scripts" / "skill_usefulness_audit_lib" / "risk_quality.py"
     risk_quality_text = read_text(risk_quality_path)
-    risk_quality_text = replace_required(
+    risk_quality_text = replace_top_level_function(
         risk_quality_text,
-        """def default_roots() -> list[Path]:
-    roots: list[Path] = []
-    seen: set[str] = set()
-
-    def append_if_exists(path: Path) -> None:
-        if not path.exists():
-            return
-        resolved = path.resolve()
-        key = os.path.normcase(str(resolved))
-        if key in seen:
-            return
-        seen.add(key)
-        roots.append(resolved)
-
-    cwd = Path.cwd()
-    for candidate in (
-        cwd / "skills",
-        cwd / ".agents" / "skills",
-        cwd / ".claude" / "skills",
-    ):
-        append_if_exists(candidate)
-
-    home = Path.home()
-    codex_home = os.environ.get("CODEX_HOME")
-    if codex_home:
-        append_if_exists(Path(codex_home).expanduser() / "skills")
-    for candidate in (
-        home / ".codex" / "skills",
-        home / ".openclaw" / "skills",
-        home / ".agents" / "skills",
-        home / ".claude" / "skills",
-        home / ".hermes" / "skills",
-    ):
-        append_if_exists(candidate)
-    return roots
-""",
+        "default_roots",
         """def default_roots() -> list[Path]:
     roots: list[Path] = []
     seen: set[str] = set()

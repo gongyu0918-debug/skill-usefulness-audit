@@ -15,6 +15,33 @@ RISK_REVIEW_GUIDANCE = {
     "script-exec-call": "The script invokes a child process; inspect the called command and arguments.",
 }
 
+ACTION_ADVICE = {
+    "delete": "Remove it after a quick human check; the evidence says it is not earning its place.",
+    "merge-delete": "Merge any useful parts into the stronger overlapping skill, then remove this one after review.",
+    "merge-or-review": "Compare it with the overlapping skill before deciding whether to merge or keep it.",
+    "observe-30d": "Keep it for now and collect better usage evidence before making a removal decision.",
+    "quarantine-review": "Do not trust it yet; inspect the risky files before using or keeping it.",
+    "review-risk": "Review the risky behavior before deciding whether it should stay installed.",
+    "review-system": "Review this system skill carefully because it carries higher-risk signals.",
+    "keep-review-risk": "It looks useful, but keep it only after checking the risk signals.",
+    "keep-review-burden": "It looks useful, but simplify it because it is expensive to load or maintain.",
+    "review-burden": "Review and simplify it before treating it as worth keeping.",
+    "review-vs-community": "Check community evidence and run a benchmark before replacing or removing it.",
+    "review": "Review it with better evidence before making a keep or delete decision.",
+    "keep-narrow": "Keep it, but narrow the trigger or scope if it overlaps with another skill.",
+    "keep": "Keep it; the evidence is strong enough.",
+    "keep-system": "Keep it as a system skill.",
+}
+
+
+def action_advice(action: str, reason: str) -> str:
+    if action in ACTION_ADVICE:
+        return ACTION_ADVICE[action]
+    normalized_reason = reason.strip().rstrip(".")
+    if normalized_reason:
+        return f"Review it before changing anything: {normalized_reason}."
+    return "Review it before changing anything."
+
 
 def short_risk_flags(flags: list[str]) -> str:
     if not flags:

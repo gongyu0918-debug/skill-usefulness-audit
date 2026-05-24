@@ -2,7 +2,7 @@
 name: skill-usefulness-audit
 slug: skill-usefulness-audit
 description: Audits installed agent skills for usage, overlap, burden, risk, and missing evidence. Use only when the user asks to audit, clean up, merge, delete, or review skills.
-version: 0.2.12
+version: 0.2.13
 tags: ["audit","skills","ablation","openclaw"]
 user-invocable: true
 disable-model-invocation: true
@@ -30,16 +30,10 @@ OpenClaw picks up installed workspace skills in the next session. For other agen
 Use this skill to judge whether installed skills still deserve to stay installed.
 It turns vague "this feels useless" opinions into a repeatable audit based on usage evidence, overlap, outcome impact, quality burden, confidence, community prior, and static risk hints.
 
-用这个 skill 判断哪些已安装 skill 还值得保留。
-它把“感觉没用”变成可复现的审计流程，基于使用证据、功能重叠、结果影响、质量负担、证据置信度、社区先验和静态风险提示来判断。
-
 ## Manual Trigger Only
 
 Run this skill only after a direct user request.
 Do not invoke it implicitly during normal task execution.
-
-只在用户手动要求时运行。
-正常任务执行过程中不要隐式触发。
 
 ## Audit Scope
 
@@ -55,18 +49,6 @@ Audit these layers in order:
 
 Treat API and tool skills as protected capability skills during ablation.
 Examples: Excel, DOCX, PDF, browser automation, deployment, OCR, external API wrappers, MCP/API gateway helpers.
-
-按这个顺序审计：
-
-1. 带近期信息和来源质量的使用证据
-2. 已安装 skill 的元数据与说明
-3. skill 之间的功能重叠
-4. 非 API、非工具型 skill 在历史对话上的消融影响
-5. 静态健康度与风险信号
-6. 可选的离线社区或注册表指标
-
-在消融阶段，把 API skill 和工具型 skill 当作受保护能力。
-例如：Excel、DOCX、PDF、浏览器自动化、部署、OCR、外部 API 包装器、MCP/API 网关类 skill。
 
 ## Workflow
 
@@ -93,7 +75,7 @@ Examples: Excel, DOCX, PDF, browser automation, deployment, OCR, external API wr
    Run actual replay only for candidates selected by that plan.
 7. Score quality burden.
    Penalize over-triggering with low execution or low ablation impact.
-   Penalize bloated `SKILL.md`, excessive reference loading, hidden reference files, vague resource names, long references without a table of contents, reference/assets dumps, executable assets, script count bloat, script maintenance smells, script failure, script syntax errors, and repeated agent repair.
+   Penalize bloated `SKILL.md`, overlong frontmatter descriptions, excessive reference loading, hidden reference files, vague resource names, long references without a table of contents, reference/assets dumps, executable assets, script count bloat, script maintenance smells, script failure, script syntax errors, and repeated agent repair.
 8. Scan static risk and health signals.
    Record shell, network, install-hook, packaging, protected-path, persistence, dynamic-exec, or private-content patterns as static hints, not as a safety proof.
 9. Load optional community metrics.
@@ -157,9 +139,9 @@ Always return these tables:
 1. Full score table with:
    `rank`, `skill`, `source`, `kind`, `calls`, `recent_30d`, `usage`, `uniqueness`, `impact`, `community`, `confidence`, `risk`, `local`, `burden`, `final`, `verdict`, `action`, `basis`
 2. Recommended actions with:
-   `skill`, `local`, `burden`, `final`, `confidence`, `risk`, `action`, `reason`
+   `skill`, `local`, `burden`, `final`, `confidence`, `risk`, `action`, `advice`
 3. Deletion or merge candidates with:
-   `skill`, `local`, `burden`, `final`, `kind`, `action`, `trigger`, `reason`
+   `skill`, `local`, `burden`, `final`, `kind`, `action`, `trigger`, `advice`
 4. Missing-evidence table when usage, ablation, or optional community data is incomplete.
 5. Quality-burden table when a skill has context, asset, reference, script, or over-triggering burden.
 
@@ -172,6 +154,7 @@ Always include these JSON fields:
 - `quality_evidence`: concrete burden flags and evidence.
 - `community_breakdown`: registry signal components when community data is present.
 - `ablation_plan`: cost-efficient plan with candidate skills, model-cost estimates, stop rules, and expected accuracy impact.
+- `action_advice`: plain-language recommendation for the user.
 - `risk_review`: concise human review guidance for any static risk flags.
 
 Keep deletion advice conservative for system or host-core skills.

@@ -2,6 +2,19 @@
 
 Use this protocol for `general` skills selected by the ablation plan.
 
+## Contents
+
+- Goal
+- Cost-Efficient Triage
+- Sampling
+- Replay Method
+- Judge Method
+- Case Judgment
+- Judgment Rule
+- Early Stop Rules
+- Model Cost
+- Reporting
+
 ## Goal
 
 Measure whether the skill changes outcomes in a meaningful way.

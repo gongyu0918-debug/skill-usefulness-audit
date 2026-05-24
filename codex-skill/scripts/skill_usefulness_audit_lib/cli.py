@@ -109,6 +109,7 @@ def run_audit(args: argparse.Namespace) -> int:
             best_overlap,
             community_prior,
         )
+        advice = action_advice(action, action_reason)
         score_breakdown = {
             "usage": {
                 "score": u_score,
@@ -142,13 +143,13 @@ def run_audit(args: argparse.Namespace) -> int:
                 "confidence": community_conf,
                 "breakdown": community_breakdown,
             },
-                "risk": {
-                    "level": skill["risk_level"],
-                    "score": skill["risk_score"],
-                    "flags": skill["risk_flags"],
-                    "static_level": skill["static_risk_level"],
-                    "static_flags": skill["static_risk_flags"],
-                },
+            "risk": {
+                "level": skill["risk_level"],
+                "score": skill["risk_score"],
+                "flags": skill["risk_flags"],
+                "static_level": skill["static_risk_level"],
+                "static_flags": skill["static_risk_flags"],
+            },
             "quality": {
                 "penalty": quality_penalty_value,
                 "penalty_uncapped": quality_penalty_uncapped,
@@ -199,6 +200,7 @@ def run_audit(args: argparse.Namespace) -> int:
                 "verdict": verdict(final),
                 "action": action,
                 "action_reason": action_reason,
+                "action_advice": advice,
                 "delete_candidate": delete_candidate,
                 "delete_trigger": action_reason if delete_candidate else None,
                 "overlap_peer": best_peer,
@@ -434,7 +436,7 @@ def run_audit(args: argparse.Namespace) -> int:
                 fmt_optional_float(item["confidence_score"]),
                 str(item["risk_level"]),
                 str(item["action"]),
-                str(item["action_reason"]),
+                str(item["action_advice"]),
             ]
             for item in recommended_actions
         ]
@@ -443,7 +445,7 @@ def run_audit(args: argparse.Namespace) -> int:
                 "",
                 "## Recommended Actions",
                 "",
-                markdown_table(["Skill", "Local", "Burden", "Final", "Confidence", "Risk", "Action", "Reason"], action_rows),
+                markdown_table(["Skill", "Local", "Burden", "Final", "Confidence", "Risk", "Action", "Advice"], action_rows),
             ]
         )
 
@@ -457,7 +459,7 @@ def run_audit(args: argparse.Namespace) -> int:
                 str(item["kind"]),
                 str(item["action"]),
                 str(item["delete_trigger"]),
-                str(item["basis"]),
+                str(item["action_advice"]),
             ]
             for item in delete_candidates
         ]
@@ -466,7 +468,7 @@ def run_audit(args: argparse.Namespace) -> int:
                 "",
                 "## Delete Candidates",
                 "",
-                markdown_table(["Skill", "Local", "Burden", "Final", "Kind", "Action", "Trigger", "Reason"], delete_rows),
+                markdown_table(["Skill", "Local", "Burden", "Final", "Kind", "Action", "Trigger", "Advice"], delete_rows),
             ]
         )
 
