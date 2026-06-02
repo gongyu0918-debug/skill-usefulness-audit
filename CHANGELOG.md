@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.16
+
+- 修复 readiness required-env 解析边界，raw frontmatter 顶层 `ENV` / `API_KEYS` / `SECRETS` 等普通元数据不再被误当作必需环境变量
+- 支持显式 required env 中的 camelCase key/token/secret 名称，同时保持 dict key 扫描保守，避免把 `skillKey` 等元数据当环境变量
+- 修复 object 形式 required env 中 `name` 展示名遮蔽 `env` / `envVar` / `variable` 的漏检问题，并保留 `name` 直接声明变量名的兼容
+- 增加 12 个 readiness 边界样例回归，覆盖 false positive、camelCase、object schema 与 name-only 兼容
+
 ## 0.2.15
 
 - 收窄安装身份去重，只用 ClawHub `_meta.json` 和 OpenClaw `skillKey` 等强身份去重，避免同名但不同用途的 OpenClaw 手装 skill 被误合并

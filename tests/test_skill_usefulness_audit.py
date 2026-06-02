@@ -764,6 +764,98 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
         self.assertEqual(item["missing_required_env"], [])
         self.assertNotIn("missing-required-env", item["quality_flags"])
 
+    def test_frontmatter_top_level_env_like_fields_are_not_required_env(self) -> None:
+        skills_root = self.tempdir / "skills"
+        samples = [
+            ("inline-env-helper", "ENV", "INLINE_ENV_SAMPLE_KEY"),
+            ("inline-api-keys-helper", "API_KEYS", "INLINE_API_KEYS_SAMPLE_KEY"),
+            ("inline-secrets-helper", "SECRETS", "INLINE_SECRETS_SAMPLE_KEY"),
+        ]
+        for name, field, env_name in samples:
+            skill_dir = write_skill(skills_root, name, "Call APIs with inline examples.")
+            (skill_dir / "SKILL.md").write_text(
+                "---\n"
+                f"name: {name}\n"
+                "description: Call APIs with inline examples.\n"
+                "OPENAI_API_KEY_BASE64: abc123\n"
+                f"{field}: [\"{env_name}\"]\n"
+                f'metadata: {{"openclaw":{{"skillKey":"{name}"}}}}\n'
+                "---\n"
+                "Use the inline sample payload when testing local transforms.\n",
+                encoding="utf-8",
+            )
+
+        payload = self.run_audit_json("--skills-root", str(skills_root))
+
+        for name, _field, _env_name in samples:
+            item = self.first_result(payload, name)
+            self.assertEqual(item["required_env"], [], msg=name)
+            self.assertEqual(item["missing_required_env"], [], msg=name)
+            self.assertNotIn("missing-required-env", item["quality_flags"], msg=name)
+
+    def test_required_env_accepts_camel_case_secret_names(self) -> None:
+        skills_root = self.tempdir / "skills"
+        samples = [
+            ("nextauth-helper", "NextAuthSecret"),
+            ("openai-helper", "OpenAiApiKey"),
+            ("stripe-helper", "StripeSecretKey"),
+        ]
+        for name, env_name in samples:
+            skill_dir = write_skill(skills_root, name, "Call configured external API providers.")
+            metadata = {"openclaw": {"skillKey": name, "requires": {"env": [env_name]}}}
+            text = (skill_dir / "SKILL.md").read_text(encoding="utf-8")
+            text = text.replace("---\n\n#", f"metadata: {json.dumps(metadata)}\n---\n\n#", 1)
+            (skill_dir / "SKILL.md").write_text(text, encoding="utf-8")
+
+        payload = self.run_audit_json("--skills-root", str(skills_root))
+
+        for name, env_name in samples:
+            item = self.first_result(payload, name)
+            self.assertIn(env_name, item["required_env"], msg=name)
+            self.assertIn(env_name, item["missing_required_env"], msg=name)
+            self.assertIn("missing-required-env", item["quality_flags"], msg=name)
+
+    def test_required_env_dict_with_display_name_uses_env_fields(self) -> None:
+        skills_root = self.tempdir / "skills"
+        samples = [
+            ("object-openai-helper", {"name": "OpenAI", "env": "SKILL_AUDIT_OBJECT_OPENAI_KEY"}, "SKILL_AUDIT_OBJECT_OPENAI_KEY"),
+            ("object-stripe-helper", {"name": "Stripe", "envVar": "SKILL_AUDIT_OBJECT_STRIPE_KEY"}, "SKILL_AUDIT_OBJECT_STRIPE_KEY"),
+            ("object-slack-helper", {"name": "Slack", "variable": "SKILL_AUDIT_OBJECT_SLACK_TOKEN"}, "SKILL_AUDIT_OBJECT_SLACK_TOKEN"),
+        ]
+        for name, env_spec, _env_name in samples:
+            skill_dir = write_skill(skills_root, name, "Call configured external API providers.")
+            metadata = {"openclaw": {"skillKey": name, "requires": {"env": [env_spec]}}}
+            text = (skill_dir / "SKILL.md").read_text(encoding="utf-8")
+            text = text.replace("---\n\n#", f"metadata: {json.dumps(metadata)}\n---\n\n#", 1)
+            (skill_dir / "SKILL.md").write_text(text, encoding="utf-8")
+
+        payload = self.run_audit_json("--skills-root", str(skills_root))
+
+        for name, _env_spec, env_name in samples:
+            item = self.first_result(payload, name)
+            self.assertIn(env_name, item["required_env"], msg=name)
+            self.assertIn(env_name, item["missing_required_env"], msg=name)
+            self.assertIn("missing-required-env", item["quality_flags"], msg=name)
+
+    def test_required_env_dict_name_only_remains_supported(self) -> None:
+        skills_root = self.tempdir / "skills"
+        skill_dir = write_skill(skills_root, "name-only-env-helper", "Call configured external API providers.")
+        metadata = {
+            "openclaw": {
+                "skillKey": "name-only-env-helper",
+                "requires": {"env": [{"name": "SKILL_AUDIT_NAME_ONLY_KEY"}]},
+            }
+        }
+        text = (skill_dir / "SKILL.md").read_text(encoding="utf-8")
+        text = text.replace("---\n\n#", f"metadata: {json.dumps(metadata)}\n---\n\n#", 1)
+        (skill_dir / "SKILL.md").write_text(text, encoding="utf-8")
+
+        payload = self.run_audit_json("--skills-root", str(skills_root))
+
+        item = self.first_result(payload, "name-only-env-helper")
+        self.assertIn("SKILL_AUDIT_NAME_ONLY_KEY", item["required_env"])
+        self.assertIn("SKILL_AUDIT_NAME_ONLY_KEY", item["missing_required_env"])
+
     def test_meta_json_required_env_is_read_for_clawhub_registry_metadata(self) -> None:
         skills_root = self.tempdir / "skills"
         skill_dir = write_skill(skills_root, "registry-api", "Call registry-backed external API connectors.")

@@ -193,10 +193,13 @@ def first_metadata_value(mapping: dict[str, object], keys: tuple[str, ...]) -> o
     return None
 
 
-def looks_like_env_name(value: str) -> bool:
-    return bool(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", value)) and (
-        value.upper() == value or value.endswith("_key") or value.endswith("_token")
-    )
+def looks_like_env_name(value: str, *, allow_camel_case: bool = False) -> bool:
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", value):
+        return False
+    lowered = value.lower()
+    if value.upper() == value or lowered.endswith(("_key", "_token", "_secret")):
+        return True
+    return allow_camel_case and lowered.endswith(("key", "token", "secret"))
 
 
 def append_required_env(target: list[str], value: object) -> None:
@@ -206,7 +209,7 @@ def append_required_env(target: list[str], value: object) -> None:
         parts = re.split(r"[,;\s]+", value.strip())
         for part in parts:
             name = part.strip()
-            if name and looks_like_env_name(name) and name not in target:
+            if name and looks_like_env_name(name, allow_camel_case=True) and name not in target:
                 target.append(name)
         return
     if isinstance(value, (list, tuple, set)):
@@ -214,10 +217,14 @@ def append_required_env(target: list[str], value: object) -> None:
             append_required_env(target, item)
         return
     if isinstance(value, dict):
-        explicit = first_metadata_value(value, ("name", "env", "env_var", "envVar", "key", "variable"))
-        if explicit is not None:
+        for explicit_key in ("env", "env_var", "envVar", "key", "variable", "name"):
+            explicit = first_metadata_value(value, (explicit_key,))
+            if explicit is None:
+                continue
+            before = len(target)
             append_required_env(target, explicit)
-            return
+            if len(target) > before:
+                return
         for key, item in value.items():
             key_text = str(key)
             if looks_like_env_name(key_text) and item is not False:
@@ -255,11 +262,12 @@ def skill_required_env(frontmatter: dict[str, object], registry_metadata: dict[s
 
     metadata = frontmatter_metadata(frontmatter)
     openclaw = openclaw_metadata(frontmatter)
-    for source in (openclaw, metadata, registry_metadata, frontmatter):
+    for source in (openclaw, metadata, registry_metadata):
         if not isinstance(source, dict):
             continue
         extend(first_metadata_value(source, ("requires",)))
         extend(source)
+    extend(first_metadata_value(frontmatter, ("requires",)))
     return env_names
 
 
