@@ -682,6 +682,37 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
         self.assertEqual(skill["description"], "Use browser automation to inspect PDF reports.")
         self.assertEqual(AUDIT_MODULE.classify_skill(skill), "tool")
 
+    def test_scan_skill_reads_frontmatter_metadata_and_meta_json_identity(self) -> None:
+        skill_dir = self.tempdir / "metadata-helper"
+        skill_dir.mkdir()
+        (skill_dir / "SKILL.md").write_text(
+            "---\n"
+            "name: metadata-helper\n"
+            "description: Audit installed skills.\n"
+            'metadata: {"openclaw":{"skillKey":"metadata-helper-key","requires":{"bins":["python"]}}}\n'
+            "---\n\n"
+            "# Metadata Helper\n",
+            encoding="utf-8",
+        )
+        (skill_dir / "_meta.json").write_text(
+            json.dumps(
+                {
+                    "slug": "metadata-helper",
+                    "version": "1.2.3",
+                    "ownerId": "owner-1",
+                    "publishedAt": "2026-06-01T00:00:00Z",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        skill = AUDIT_MODULE.scan_skill(skill_dir / "SKILL.md")
+
+        self.assertEqual(skill["skill_key"], "metadata-helper-key")
+        self.assertEqual(skill["install_identity"], "clawhub:owner-1:metadata-helper")
+        self.assertEqual(skill["metadata"]["openclaw"]["requires"]["bins"], ["python"])
+        self.assertEqual(skill["registry_metadata"]["version"], "1.2.3")
+
     def test_scan_skill_ignores_python_cache_files_for_script_count(self) -> None:
         skills_root = self.tempdir / "skills"
         skill_dir = write_skill(skills_root, "cache-clean-helper", "Run one local helper.")
@@ -981,6 +1012,76 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
         self.assertEqual(second["display_name"], "frontend-skill@skills-b")
         self.assertEqual(first["overlap_peer"], "frontend-skill@skills-b")
         self.assertEqual(second["overlap_peer"], "frontend-skill@skills-a")
+
+    def test_duplicate_clawhub_install_identity_is_audited_once(self) -> None:
+        root_a = self.tempdir / "workspace-skills"
+        root_b = self.tempdir / "openclaw-skills"
+        write_skill(root_a, "talk-normal", "Rewrite casual text into normal talk.")
+        write_skill(root_b, "talk-normal", "Rewrite casual text into normal talk.")
+        meta = {
+            "slug": "talk-normal",
+            "version": "1.0.0",
+            "ownerId": "owner-1",
+            "publishedAt": "2026-06-01T00:00:00Z",
+        }
+        for skill_dir in (root_a / "talk-normal", root_b / "talk-normal"):
+            (skill_dir / "_meta.json").write_text(json.dumps(meta), encoding="utf-8")
+
+        plan_out = self.tempdir / "ablation-plan.json"
+        payload = self.run_audit_json(
+            "--skills-root",
+            str(root_a),
+            "--skills-root",
+            str(root_b),
+            "--ablation-plan-out",
+            str(plan_out),
+        )
+        plan = json.loads(plan_out.read_text(encoding="utf-8"))
+
+        self.assertEqual(len(self.results_named(payload, "talk-normal")), 1)
+        self.assertEqual(payload["skills_audited"], 1)
+        self.assertEqual(payload["results"][0]["install_identity"], "clawhub:owner-1:talk-normal")
+        self.assertLessEqual(
+            len([item for item in plan["candidates"] if item["skill"].startswith("talk-normal")]),
+            1,
+        )
+
+    def test_host_metadata_alias_deduplicates_source_and_bundle_editions(self) -> None:
+        root_a = self.tempdir / "codex-source"
+        root_b = self.tempdir / "openclaw-bundle"
+        skill_a = root_a / "dual-host-helper"
+        skill_b = root_b / "dual-host-helper"
+        skill_a.mkdir(parents=True)
+        skill_b.mkdir(parents=True)
+        (skill_a / "SKILL.md").write_text(
+            "---\n"
+            "name: dual-host-helper\n"
+            "description: Audit installed skills.\n"
+            'metadata: {"openclaw":{"requires":{"bins":["python"]}},"hermes":{"category":"devtools"}}\n'
+            "---\n\n"
+            "# dual-host-helper\n",
+            encoding="utf-8",
+        )
+        (skill_b / "SKILL.md").write_text(
+            "---\n"
+            "name: dual-host-helper\n"
+            "slug: dual-host-helper\n"
+            "description: Audit installed skills.\n"
+            'metadata: {"openclaw":{"skillKey":"dual-host-helper","requires":{"bins":["python"]}}}\n'
+            "---\n\n"
+            "# dual-host-helper\n",
+            encoding="utf-8",
+        )
+
+        payload = self.run_audit_json(
+            "--skills-root",
+            str(root_a),
+            "--skills-root",
+            str(root_b),
+        )
+
+        self.assertEqual(len(self.results_named(payload, "dual-host-helper")), 1)
+        self.assertEqual(payload["skills_audited"], 1)
 
     def test_ambiguous_name_evidence_adds_note(self) -> None:
         root_a = self.tempdir / "skills-a"

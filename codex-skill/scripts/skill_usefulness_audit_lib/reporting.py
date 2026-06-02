@@ -271,6 +271,34 @@ def accuracy_impact(candidates: list[dict[str, object]], deferred: list[dict[str
     }
 
 
+def ablation_result_identity(item: dict[str, object]) -> str:
+    return ablation_result_identities(item)[0]
+
+
+def ablation_result_identities(item: dict[str, object]) -> list[str]:
+    install_identities = item.get("install_identities")
+    if isinstance(install_identities, list):
+        identities = [f"install:{identity}" for identity in install_identities if identity]
+        if identities:
+            return identities
+    install_identity = str(item.get("install_identity") or "")
+    if install_identity:
+        return [f"install:{install_identity}"]
+    return [f"path:{item['path']}"]
+
+
+def unique_ablation_results(results: list[dict[str, object]]) -> list[dict[str, object]]:
+    unique: list[dict[str, object]] = []
+    seen: set[str] = set()
+    for item in results:
+        identities = ablation_result_identities(item)
+        if any(identity in seen for identity in identities):
+            continue
+        seen.update(identities)
+        unique.append(item)
+    return unique
+
+
 def build_ablation_plan(
     results: list[dict[str, object]],
     max_candidates: int = ABLATION_DEFAULT_MAX_CANDIDATES,
@@ -283,7 +311,7 @@ def build_ablation_plan(
     initial_cases_per_candidate = max(1, initial_cases_per_candidate)
     expand_to_cases = max(initial_cases_per_candidate, expand_to_cases)
     max_cases_per_candidate = max(expand_to_cases, max_cases_per_candidate)
-    general = [item for item in results if item["kind"] == "general"]
+    general = unique_ablation_results([item for item in results if item["kind"] == "general"])
     scored: list[tuple[float, dict[str, object], list[str]]] = []
     for item in general:
         score, reasons = ablation_priority(item)

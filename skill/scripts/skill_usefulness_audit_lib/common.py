@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+try:
+    import yaml
+except ImportError:  # pragma: no cover - optional dependency
+    yaml = None
+
 from .constants import *
 
 def clamp(value: float, low: float, high: float) -> float:
@@ -81,8 +86,41 @@ def strip_yaml_quotes(value: str) -> str:
     return value
 
 
-def parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
-    """Parse the scalar frontmatter fields needed for skill discovery."""
+def parse_frontmatter_scalar(value: str) -> object:
+    value = strip_yaml_quotes(value)
+    stripped = value.strip()
+    if stripped[:1] in {"{", "["} and stripped[-1:] in {"}", "]"}:
+        try:
+            return json.loads(stripped)
+        except json.JSONDecodeError:
+            return value
+    return value
+
+
+def safe_frontmatter_mapping(raw_yaml: str) -> dict[str, object] | None:
+    if yaml is None:
+        return None
+    try:
+        data = yaml.safe_load(raw_yaml) or {}
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+    return {str(key): json_safe_value(value) for key, value in data.items()}
+
+
+def json_safe_value(value):
+    if isinstance(value, dict):
+        return {str(key): json_safe_value(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [json_safe_value(item) for item in value]
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    return str(value)
+
+
+def parse_frontmatter(text: str) -> tuple[dict[str, object], str]:
+    """Parse frontmatter fields needed for skill discovery."""
     lines = text.splitlines(keepends=True)
     if not lines or lines[0].strip() != "---":
         return {}, text
@@ -97,7 +135,11 @@ def parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
 
     raw_yaml = "".join(lines[1:end_index])
     body = "".join(lines[end_index + 1 :]).lstrip("\r\n")
-    data: dict[str, str] = {}
+    parsed = safe_frontmatter_mapping(raw_yaml)
+    if parsed is not None:
+        return parsed, body
+
+    data: dict[str, object] = {}
     yaml_lines = raw_yaml.splitlines()
     index = 0
     while index < len(yaml_lines):
@@ -121,8 +163,111 @@ def parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
             data[key] = (" " if raw_value == ">" else "\n").join(parts)
             continue
         if raw_value:
-            data[key] = strip_yaml_quotes(raw_value)
+            data[key] = parse_frontmatter_scalar(raw_value)
     return data, body
+
+
+def mapping_from_value(value) -> dict[str, object]:
+    if isinstance(value, dict):
+        return {str(key): json_safe_value(item) for key, item in value.items()}
+    if isinstance(value, str):
+        text = value.strip()
+        if text.startswith("{") and text.endswith("}"):
+            try:
+                parsed = json.loads(text)
+            except json.JSONDecodeError:
+                return {}
+            if isinstance(parsed, dict):
+                return {str(key): json_safe_value(item) for key, item in parsed.items()}
+    return {}
+
+
+def first_metadata_value(mapping: dict[str, object], keys: tuple[str, ...]) -> object | None:
+    lowered = {str(key).lower(): value for key, value in mapping.items()}
+    for key in keys:
+        if key in mapping:
+            return mapping[key]
+        lowered_key = key.lower()
+        if lowered_key in lowered:
+            return lowered[lowered_key]
+    return None
+
+
+def load_skill_registry_metadata(root: Path) -> dict[str, object]:
+    meta_path = root / "_meta.json"
+    if not meta_path.exists():
+        return {}
+    try:
+        payload = json.loads(read_text(meta_path))
+    except (json.JSONDecodeError, OSError):
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    return {str(key): json_safe_value(value) for key, value in payload.items()}
+
+
+def frontmatter_metadata(frontmatter: dict[str, object]) -> dict[str, object]:
+    return mapping_from_value(frontmatter.get("metadata"))
+
+
+def openclaw_metadata(frontmatter: dict[str, object]) -> dict[str, object]:
+    metadata = frontmatter_metadata(frontmatter)
+    return mapping_from_value(first_metadata_value(metadata, ("openclaw",)))
+
+
+def skill_install_identity(
+    root: Path,
+    frontmatter: dict[str, object],
+    registry_metadata: dict[str, object] | None = None,
+) -> str | None:
+    identities = skill_install_identities(root, frontmatter, registry_metadata)
+    return identities[0] if identities else None
+
+
+def skill_install_identities(
+    root: Path,
+    frontmatter: dict[str, object],
+    registry_metadata: dict[str, object] | None = None,
+) -> list[str]:
+    identities: list[str] = []
+
+    def append_identity(value: str) -> None:
+        if value and value not in identities:
+            identities.append(value)
+
+    registry = registry_metadata if registry_metadata is not None else load_skill_registry_metadata(root)
+    if registry:
+        slug = normalize_name(str(first_metadata_value(registry, ("slug", "skillKey", "skill_key", "name")) or ""))
+        owner = normalize_name(str(first_metadata_value(registry, ("ownerId", "owner_id", "owner")) or ""))
+        if slug:
+            append_identity(f"clawhub:{owner}:{slug}" if owner else f"skill:{slug}")
+
+    metadata = frontmatter_metadata(frontmatter)
+    openclaw = openclaw_metadata(frontmatter)
+    skill_key = normalize_name(str(first_metadata_value(openclaw, ("skillKey", "skill_key")) or ""))
+    if skill_key:
+        append_identity(f"skill:{skill_key}")
+    if metadata:
+        slug = normalize_name(str(frontmatter.get("slug") or ""))
+        name = normalize_name(str(frontmatter.get("name") or ""))
+        append_identity(f"skill:{slug}" if slug else "")
+        append_identity(f"skill:{name}" if name else "")
+
+    return identities
+
+
+def skill_install_identity_from_file(skill_md: Path) -> str | None:
+    identities = skill_install_identities_from_file(skill_md)
+    return identities[0] if identities else None
+
+
+def skill_install_identities_from_file(skill_md: Path) -> list[str]:
+    try:
+        text = read_text(skill_md)
+    except OSError:
+        return []
+    frontmatter, _body = parse_frontmatter(text)
+    return skill_install_identities(skill_md.parent, frontmatter)
 
 
 def extract_terms(text: str) -> set[str]:

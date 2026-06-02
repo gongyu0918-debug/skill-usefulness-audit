@@ -130,5 +130,5 @@ python codex-skill/scripts/skill_usefulness_audit.py audit \
 
 ```bash
 python scripts/sync_bundle.py
-clawhub publish ./skill --slug skill-usefulness-audit --name "skill-usefulness-audit" --version 0.2.13 --tags latest,audit,skills,openclaw --changelog "Trim audit skill docs, add reference contents, plain-language action advice, sync hardening, and pseudo-skill regression tests"
+clawhub publish ./skill --slug skill-usefulness-audit --name "skill-usefulness-audit" --version 0.2.14 --tags latest,audit,skills,openclaw --changelog "Read ClawHub metadata, preserve OpenClaw skill identity, and deduplicate duplicate installs in ranking and ablation planning"
 ```

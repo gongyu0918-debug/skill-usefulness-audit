@@ -558,9 +558,22 @@ def scan_skill(skill_md: Path) -> dict[str, object]:
     root = skill_md.parent
     text = read_text(skill_md)
     frontmatter, body = parse_frontmatter(text)
-    name = normalize_name(frontmatter.get("name", root.name) or root.name)
-    slug = normalize_name(frontmatter.get("slug", ""))
-    description = frontmatter.get("description", "")
+    registry_metadata = load_skill_registry_metadata(root)
+    metadata = frontmatter_metadata(frontmatter)
+    openclaw = openclaw_metadata(frontmatter)
+    name = normalize_name(str(frontmatter.get("name", root.name) or root.name))
+    slug = normalize_name(
+        str(
+            frontmatter.get("slug")
+            or first_metadata_value(registry_metadata, ("slug",))
+            or first_metadata_value(openclaw, ("skillKey", "skill_key"))
+            or ""
+        )
+    )
+    description = str(frontmatter.get("description", "") or "").strip()
+    skill_key = normalize_name(str(first_metadata_value(openclaw, ("skillKey", "skill_key")) or ""))
+    install_identities = skill_install_identities(root, frontmatter, registry_metadata)
+    install_identity = install_identities[0] if install_identities else None
     headings = [line.lstrip("# ").strip() for line in body.splitlines() if line.startswith("#")]
     scripts_dir = root / "scripts"
     script_paths = [path for path in sorted_files(scripts_dir) if not is_generated_python_cache(path)]
@@ -584,6 +597,14 @@ def scan_skill(skill_md: Path) -> dict[str, object]:
     return {
         "name": name,
         "slug": slug,
+        "skill_key": skill_key,
+        "install_identity": install_identity,
+        "install_identities": install_identities,
+        "metadata": metadata,
+        "registry_metadata": registry_metadata,
+        "registry_version": first_metadata_value(registry_metadata, ("version",)),
+        "registry_published_at": first_metadata_value(registry_metadata, ("publishedAt", "published_at")),
+        "registry_owner_id": first_metadata_value(registry_metadata, ("ownerId", "owner_id", "owner")),
         "path": str(root),
         "source": guess_source(root),
         "namespace": guess_namespace(root),
@@ -612,15 +633,21 @@ def scan_skill(skill_md: Path) -> dict[str, object]:
 def discover_skill_files(roots: list[Path], include_system: bool) -> list[Path]:
     files: list[Path] = []
     seen: set[str] = set()
+    seen_install_identities: set[str] = set()
     for root in roots:
         if not root.exists():
             continue
         for skill_md in root.rglob("SKILL.md"):
             if not include_system and "/.system/" in skill_md.as_posix().lower():
                 continue
-            resolved = str(skill_md.resolve())
+            resolved = os.path.normcase(str(skill_md.resolve()))
             if resolved in seen:
                 continue
+            install_identities = skill_install_identities_from_file(skill_md)
+            if install_identities:
+                if any(identity in seen_install_identities for identity in install_identities):
+                    continue
+                seen_install_identities.update(install_identities)
             seen.add(resolved)
             files.append(skill_md)
     return sorted(files)

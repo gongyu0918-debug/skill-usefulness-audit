@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.14
+
+- 读取 ClawHub `_meta.json` 与 OpenClaw frontmatter metadata，保留 skillKey、requires、version、owner 等安装身份信息
+- 修复同一 skill 在多个 root 或源码/发布包双形态下重复进入排名、overlap 和消融候选的问题
+- 增加带 usage、recent calls、false triggers 与 ablation 的发布前烟测回归，覆盖 OpenClaw 适配去重场景
+
 ## 0.2.13
 
 - 精简运行时 skill 说明，减少自审时的文档负担
