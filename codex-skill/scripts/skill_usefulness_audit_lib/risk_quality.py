@@ -574,6 +574,8 @@ def scan_skill(skill_md: Path) -> dict[str, object]:
     skill_key = normalize_name(str(first_metadata_value(openclaw, ("skillKey", "skill_key")) or ""))
     install_identities = skill_install_identities(root, frontmatter, registry_metadata)
     install_identity = install_identities[0] if install_identities else None
+    required_env = skill_required_env(frontmatter, registry_metadata)
+    missing_env = missing_required_env(required_env)
     headings = [line.lstrip("# ").strip() for line in body.splitlines() if line.startswith("#")]
     scripts_dir = root / "scripts"
     script_paths = [path for path in sorted_files(scripts_dir) if not is_generated_python_cache(path)]
@@ -605,6 +607,8 @@ def scan_skill(skill_md: Path) -> dict[str, object]:
         "registry_version": first_metadata_value(registry_metadata, ("version",)),
         "registry_published_at": first_metadata_value(registry_metadata, ("publishedAt", "published_at")),
         "registry_owner_id": first_metadata_value(registry_metadata, ("ownerId", "owner_id", "owner")),
+        "required_env": required_env,
+        "missing_required_env": missing_env,
         "path": str(root),
         "source": guess_source(root),
         "namespace": guess_namespace(root),

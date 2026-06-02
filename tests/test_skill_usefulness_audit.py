@@ -713,6 +713,78 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
         self.assertEqual(skill["metadata"]["openclaw"]["requires"]["bins"], ["python"])
         self.assertEqual(skill["registry_metadata"]["version"], "1.2.3")
 
+    def test_missing_required_env_is_quality_burden_for_declared_api_keys(self) -> None:
+        skills_root = self.tempdir / "skills"
+        samples = [
+            ("openai-wrapper", '{"openclaw":{"skillKey":"openai-wrapper","requires":{"env":["SKILL_AUDIT_TEST_OPENAI_KEY"]}}}'),
+            ("stripe-gateway", '{"openclaw":{"skillKey":"stripe-gateway","requires":{"apiKeys":["SKILL_AUDIT_TEST_STRIPE_KEY"]}}}'),
+            ("slack-connector", '{"requires":{"environment":{"SLACK_BOT_TOKEN":true}}}'),
+        ]
+        for name, metadata in samples:
+            skill_dir = write_skill(skills_root, name, "Call external API connectors for production workflows.")
+            text = (skill_dir / "SKILL.md").read_text(encoding="utf-8")
+            text = text.replace("---\n\n#", f"metadata: {metadata}\n---\n\n#", 1)
+            (skill_dir / "SKILL.md").write_text(text, encoding="utf-8")
+
+        payload = self.run_audit_json("--skills-root", str(skills_root))
+
+        for name, _metadata in samples:
+            item = self.first_result(payload, name)
+            self.assertIn("missing-required-env", item["quality_flags"], msg=name)
+            self.assertGreater(item["quality_penalty"], 0.0, msg=name)
+            self.assertTrue(item["missing_required_env"], msg=name)
+
+    def test_configured_required_env_is_not_quality_burden(self) -> None:
+        skills_root = self.tempdir / "skills"
+        skill_dir = write_skill(skills_root, "configured-api", "Call external API connectors.")
+        text = (skill_dir / "SKILL.md").read_text(encoding="utf-8")
+        text = text.replace(
+            "---\n\n#",
+            'metadata: {"openclaw":{"skillKey":"configured-api","requires":{"env":["SKILL_AUDIT_TEST_CONFIGURED_KEY"]}}}\n---\n\n#',
+            1,
+        )
+        (skill_dir / "SKILL.md").write_text(text, encoding="utf-8")
+
+        with mock.patch.dict(os.environ, {"SKILL_AUDIT_TEST_CONFIGURED_KEY": "configured"}):
+            payload = self.run_audit_json("--skills-root", str(skills_root))
+
+        item = self.first_result(payload, "configured-api")
+        self.assertNotIn("missing-required-env", item["quality_flags"])
+        self.assertEqual(item["missing_required_env"], [])
+
+    def test_api_words_without_required_env_do_not_create_readiness_burden(self) -> None:
+        skills_root = self.tempdir / "skills"
+        write_skill(skills_root, "api-description-only", "Call GitHub and Stripe APIs through provider SDKs.")
+
+        payload = self.run_audit_json("--skills-root", str(skills_root))
+
+        item = self.first_result(payload, "api-description-only")
+        self.assertEqual(item["kind"], "api")
+        self.assertEqual(item["required_env"], [])
+        self.assertEqual(item["missing_required_env"], [])
+        self.assertNotIn("missing-required-env", item["quality_flags"])
+
+    def test_meta_json_required_env_is_read_for_clawhub_registry_metadata(self) -> None:
+        skills_root = self.tempdir / "skills"
+        skill_dir = write_skill(skills_root, "registry-api", "Call registry-backed external API connectors.")
+        (skill_dir / "_meta.json").write_text(
+            json.dumps(
+                {
+                    "slug": "registry-api",
+                    "ownerId": "owner-1",
+                    "requires": {"api_keys": ["SKILL_AUDIT_TEST_REGISTRY_KEY"]},
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        payload = self.run_audit_json("--skills-root", str(skills_root))
+
+        item = self.first_result(payload, "registry-api")
+        self.assertIn("SKILL_AUDIT_TEST_REGISTRY_KEY", item["required_env"])
+        self.assertIn("SKILL_AUDIT_TEST_REGISTRY_KEY", item["missing_required_env"])
+        self.assertIn("missing-required-env", item["quality_flags"])
+
     def test_scan_skill_ignores_python_cache_files_for_script_count(self) -> None:
         skills_root = self.tempdir / "skills"
         skill_dir = write_skill(skills_root, "cache-clean-helper", "Run one local helper.")
@@ -1046,7 +1118,7 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
             1,
         )
 
-    def test_host_metadata_alias_deduplicates_source_and_bundle_editions(self) -> None:
+    def test_openclaw_skill_key_deduplicates_source_and_bundle_editions(self) -> None:
         root_a = self.tempdir / "codex-source"
         root_b = self.tempdir / "openclaw-bundle"
         skill_a = root_a / "dual-host-helper"
@@ -1057,7 +1129,7 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
             "---\n"
             "name: dual-host-helper\n"
             "description: Audit installed skills.\n"
-            'metadata: {"openclaw":{"requires":{"bins":["python"]}},"hermes":{"category":"devtools"}}\n'
+            'metadata: {"openclaw":{"skillKey":"dual-host-helper","requires":{"bins":["python"]}},"hermes":{"category":"devtools"}}\n'
             "---\n\n"
             "# dual-host-helper\n",
             encoding="utf-8",
@@ -1082,6 +1154,35 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
 
         self.assertEqual(len(self.results_named(payload, "dual-host-helper")), 1)
         self.assertEqual(payload["skills_audited"], 1)
+
+    def test_same_name_openclaw_metadata_without_skill_key_keeps_variants(self) -> None:
+        root_a = self.tempdir / "skills-a"
+        root_b = self.tempdir / "skills-b"
+        metadata = '{"openclaw":{"requires":{"bins":["python"]}}}'
+        pairs = [
+            ("review-helper", "Review code diffs for regressions.", "Review Chinese prose for publication quality."),
+            ("search-helper", "Search remote web pages and cite sources.", "Search local RAG notes and quote chunks."),
+            ("media-helper", "Transcribe audio conversations.", "Identify background music from video clips."),
+        ]
+
+        for name, left_description, right_description in pairs:
+            left = write_skill(root_a, name, left_description)
+            right = write_skill(root_b, name, right_description)
+            for skill_dir in (left, right):
+                text = (skill_dir / "SKILL.md").read_text(encoding="utf-8")
+                text = text.replace("---\n\n#", f"metadata: {metadata}\n---\n\n#", 1)
+                (skill_dir / "SKILL.md").write_text(text, encoding="utf-8")
+
+        payload = self.run_audit_json(
+            "--skills-root",
+            str(root_a),
+            "--skills-root",
+            str(root_b),
+        )
+
+        self.assertEqual(payload["skills_audited"], 6)
+        for name, _left_description, _right_description in pairs:
+            self.assertEqual(len(self.results_named(payload, name)), 2, msg=name)
 
     def test_ambiguous_name_evidence_adds_note(self) -> None:
         root_a = self.tempdir / "skills-a"

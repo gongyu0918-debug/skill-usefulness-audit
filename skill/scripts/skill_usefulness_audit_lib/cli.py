@@ -155,6 +155,8 @@ def run_audit(args: argparse.Namespace) -> int:
                 "penalty_uncapped": quality_penalty_uncapped,
                 "flags": quality_flags,
                 "resource_metrics": skill["resource_metrics"],
+                "required_env": skill.get("required_env"),
+                "missing_required_env": skill.get("missing_required_env"),
             },
             "confidence": {
                 "score": confidence,
@@ -176,6 +178,8 @@ def run_audit(args: argparse.Namespace) -> int:
                 "registry_version": skill.get("registry_version"),
                 "registry_published_at": skill.get("registry_published_at"),
                 "registry_owner_id": skill.get("registry_owner_id"),
+                "required_env": skill.get("required_env"),
+                "missing_required_env": skill.get("missing_required_env"),
                 "kind": kind,
                 "path": skill["path"],
                 "calls": calls,

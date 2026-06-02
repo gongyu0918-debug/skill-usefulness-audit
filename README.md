@@ -130,5 +130,5 @@ python codex-skill/scripts/skill_usefulness_audit.py audit \
 
 ```bash
 python scripts/sync_bundle.py
-clawhub publish ./skill --slug skill-usefulness-audit --name "skill-usefulness-audit" --version 0.2.14 --tags latest,audit,skills,openclaw --changelog "Read ClawHub metadata, preserve OpenClaw skill identity, and deduplicate duplicate installs in ranking and ablation planning"
+clawhub publish ./skill --slug skill-usefulness-audit --name "skill-usefulness-audit" --version 0.2.15 --tags latest,audit,skills,openclaw --changelog "Tighten install identity dedupe and flag missing declared API keys or required environment variables"
 ```

@@ -6,7 +6,7 @@ tags: ["audit","skills","ablation","agent-skills"]
 user-invocable: true
 disable-model-invocation: true
 argument-hint: "--skills-root PATH --usage-file FILE"
-metadata: {"openclaw":{"requires":{"bins":["python"]}},"hermes":{"category":"devtools","tags":["audit","skills","python"],"requires_toolsets":["terminal"]},"claude_code":{"manual_invocation":true}}
+metadata: {"openclaw":{"skillKey":"skill-usefulness-audit","requires":{"bins":["python"]}},"hermes":{"category":"devtools","tags":["audit","skills","python"],"requires_toolsets":["terminal"]},"claude_code":{"manual_invocation":true}}
 ---
 
 # Skill Usefulness Audit

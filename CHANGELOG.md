@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.15
+
+- 收窄安装身份去重，只用 ClawHub `_meta.json` 和 OpenClaw `skillKey` 等强身份去重，避免同名但不同用途的 OpenClaw 手装 skill 被误合并
+- 识别 metadata / `_meta.json` 中声明的 required env、API key、secret 变量，缺失时作为 `missing-required-env` readiness 负担写入报告
+- 增加同名 OpenClaw 变体、缺失 API key、已配置 API key、描述含 API 但未声明 env、registry metadata requires 的回归测试
+
 ## 0.2.14
 
 - 读取 ClawHub `_meta.json` 与 OpenClaw frontmatter metadata，保留 skillKey、requires、version、owner 等安装身份信息

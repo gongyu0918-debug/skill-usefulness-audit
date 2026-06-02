@@ -252,12 +252,27 @@ def runtime_quality_evidence(
     return evidence
 
 
+def readiness_quality_evidence(skill: dict[str, object]) -> list[dict[str, object]]:
+    missing_env = [str(item) for item in skill.get("missing_required_env", []) if item]
+    if not missing_env:
+        return []
+    return [
+        quality_issue(
+            "missing-required-env",
+            0.90,
+            "declared required environment variables are not configured",
+            metrics={"missing_env": missing_env, "missing_env_count": len(missing_env)},
+        )
+    ]
+
+
 def quality_penalty(
     skill: dict[str, object],
     usage_record: dict[str, object],
     ablation: dict[str, float] | None,
 ) -> dict[str, object]:
     evidence = list(skill.get("static_quality_evidence", []))
+    evidence.extend(readiness_quality_evidence(skill))
     evidence.extend(runtime_quality_evidence(usage_record, ablation))
     penalty_uncapped = round(sum(float(item["penalty"]) for item in evidence), 2)
     penalty = round(clamp(penalty_uncapped, 0.0, 2.0), 2)

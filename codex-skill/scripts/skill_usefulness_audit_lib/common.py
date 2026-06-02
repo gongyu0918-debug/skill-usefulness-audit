@@ -193,6 +193,80 @@ def first_metadata_value(mapping: dict[str, object], keys: tuple[str, ...]) -> o
     return None
 
 
+def looks_like_env_name(value: str) -> bool:
+    return bool(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", value)) and (
+        value.upper() == value or value.endswith("_key") or value.endswith("_token")
+    )
+
+
+def append_required_env(target: list[str], value: object) -> None:
+    if value is None or value is False:
+        return
+    if isinstance(value, str):
+        parts = re.split(r"[,;\s]+", value.strip())
+        for part in parts:
+            name = part.strip()
+            if name and looks_like_env_name(name) and name not in target:
+                target.append(name)
+        return
+    if isinstance(value, (list, tuple, set)):
+        for item in value:
+            append_required_env(target, item)
+        return
+    if isinstance(value, dict):
+        explicit = first_metadata_value(value, ("name", "env", "env_var", "envVar", "key", "variable"))
+        if explicit is not None:
+            append_required_env(target, explicit)
+            return
+        for key, item in value.items():
+            key_text = str(key)
+            if looks_like_env_name(key_text) and item is not False:
+                append_required_env(target, key_text)
+
+
+def required_env_from_requires(value: object) -> list[str]:
+    env_names: list[str] = []
+    if isinstance(value, dict):
+        for key in (
+            "env",
+            "envs",
+            "env_vars",
+            "envVars",
+            "environment",
+            "environment_variables",
+            "environmentVariables",
+            "secrets",
+            "apiKeys",
+            "api_keys",
+        ):
+            append_required_env(env_names, first_metadata_value(value, (key,)))
+    else:
+        append_required_env(env_names, value)
+    return env_names
+
+
+def skill_required_env(frontmatter: dict[str, object], registry_metadata: dict[str, object]) -> list[str]:
+    env_names: list[str] = []
+
+    def extend(value: object) -> None:
+        for name in required_env_from_requires(value):
+            if name not in env_names:
+                env_names.append(name)
+
+    metadata = frontmatter_metadata(frontmatter)
+    openclaw = openclaw_metadata(frontmatter)
+    for source in (openclaw, metadata, registry_metadata, frontmatter):
+        if not isinstance(source, dict):
+            continue
+        extend(first_metadata_value(source, ("requires",)))
+        extend(source)
+    return env_names
+
+
+def missing_required_env(required_env: list[str]) -> list[str]:
+    return [name for name in required_env if not os.environ.get(name)]
+
+
 def load_skill_registry_metadata(root: Path) -> dict[str, object]:
     meta_path = root / "_meta.json"
     if not meta_path.exists():
@@ -242,16 +316,10 @@ def skill_install_identities(
         if slug:
             append_identity(f"clawhub:{owner}:{slug}" if owner else f"skill:{slug}")
 
-    metadata = frontmatter_metadata(frontmatter)
     openclaw = openclaw_metadata(frontmatter)
     skill_key = normalize_name(str(first_metadata_value(openclaw, ("skillKey", "skill_key")) or ""))
     if skill_key:
         append_identity(f"skill:{skill_key}")
-    if metadata:
-        slug = normalize_name(str(frontmatter.get("slug") or ""))
-        name = normalize_name(str(frontmatter.get("name") or ""))
-        append_identity(f"skill:{slug}" if slug else "")
-        append_identity(f"skill:{name}" if name else "")
 
     return identities
 
