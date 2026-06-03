@@ -130,5 +130,5 @@ python codex-skill/scripts/skill_usefulness_audit.py audit \
 
 ```bash
 python scripts/sync_bundle.py
-clawhub publish ./skill --slug skill-usefulness-audit --name "skill-usefulness-audit" --version 0.2.16 --tags latest,audit,skills,openclaw --changelog "Fix readiness required-env parsing boundaries, camelCase declarations, and object schema env fields"
+clawhub publish ./skill --slug skill-usefulness-audit --name "skill-usefulness-audit" --version 0.2.17 --tags latest,audit,skills,openclaw --changelog "Restore MIT-0 license files in the GitHub repository and OpenClaw bundle"
 ```
