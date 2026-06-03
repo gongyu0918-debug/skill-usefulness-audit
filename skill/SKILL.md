@@ -2,7 +2,7 @@
 name: skill-usefulness-audit
 slug: skill-usefulness-audit
 description: Audits installed agent skills for usage, overlap, burden, risk, and missing evidence. Use only when the user asks to audit, clean up, merge, delete, or review skills.
-version: 0.2.16
+version: 0.2.17
 tags: ["audit","skills","ablation","openclaw"]
 user-invocable: true
 disable-model-invocation: true

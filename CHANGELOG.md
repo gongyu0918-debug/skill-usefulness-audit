@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.17
+
+- 恢复 MIT-0 license 文件，并将同一 license 文件纳入 ClawHub/OpenClaw 发布包
+
 ## 0.2.16
 
 - 修复 readiness required-env 解析边界，raw frontmatter 顶层 `ENV` / `API_KEYS` / `SECRETS` 等普通元数据不再被误当作必需环境变量
