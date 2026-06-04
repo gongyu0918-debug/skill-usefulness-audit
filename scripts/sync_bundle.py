@@ -382,7 +382,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if BUNDLE_DIR.exists():
         shutil.rmtree(BUNDLE_DIR)
-    shutil.copytree(SOURCE_DIR, BUNDLE_DIR, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    shutil.copytree(SOURCE_DIR, BUNDLE_DIR, ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "agents"))
     normalize_text_tree(BUNDLE_DIR)
     apply_openclaw_script_overrides(BUNDLE_DIR)
 

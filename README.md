@@ -56,14 +56,15 @@ python codex-skill/scripts/skill_usefulness_audit.py audit \
 | `frontend-skill@user` | 4.8 | `merge-or-review` | overlaps with plugin copy |
 | `old-tone-helper` | 2.8 | `delete` | no recent use, high overlap, no ablation gain |
 | `bloated-helper` | 5.2 | `review-burden` | high activation, little impact, heavy references/assets |
-| `shell-installer` | 6.4 | `quarantine-review` | useful, but high-risk execution pattern |
+| `shell-installer` | 6.4 | `quarantine-review` | useful, but high-risk execution pattern (`risk_score >= 4.0`) |
 
 The Markdown report is for humans. The JSON report is for automation and keeps the same evidence in machine-readable form.
 
 ## How To Read The Report
 
 - `local_score`: the 10-point usefulness score from usage, uniqueness, and impact.
-- `quality_penalty`: `0.0-2.0` burden from over-triggering, context-heavy resources, weak scripts, or suspicious bundled artifacts.
+- `quality_penalty`: `0.0-2.5` burden from over-triggering, context-heavy resources, weak scripts, or suspicious bundled artifacts.
+- `quality_penalty_uncapped`: raw burden before the display/action cap; use it to see when the cap is hiding extra maintenance cost.
 - `final_score`: `local_score - quality_penalty`, used for ranking and action suggestions.
 - `confidence_score`: how much evidence backs the score.
 - `report_mode`: `strong-evidence`, `partial-evidence`, or `structure-only`.
@@ -73,7 +74,9 @@ The Markdown report is for humans. The JSON report is for automation and keeps t
 - `action_advice`: plain-language recommendation for the human reviewer.
 - `history_mentions` / `suspected_invocations`: weak transcript fallback evidence. These do not count as direct `calls`.
 
-Actions are conservative recommendations, not automatic operations. Low-confidence skills usually go to `observe-30d`. High-risk skills go to `quarantine-review` even when they score well locally, and `delete` / `merge-delete` always require manual review before removal.
+Use `action` / `action_advice` as the final human-facing recommendation. `verdict` is only a `final_score` band, so risk, quality burden, confidence, or community signals can deliberately make `action` stricter than `verdict`. The `basis` column is a compact explanation for humans, while JSON `score_breakdown` is the complete machine-readable evidence.
+
+Actions are conservative recommendations, not automatic operations. Low-confidence skills usually go to `observe-30d`. High-risk skills (`risk_score >= 4.0`) go to `quarantine-review` even when they score well locally, and `delete` / `merge-delete` always require manual review before removal.
 
 ## Inputs
 
@@ -95,7 +98,7 @@ Duplicate skill names resolve through `path`, `namespace`, and `source`. If an i
 
 - Usage: recent calls, all-time calls, active days, last-used date, weak history mentions, and evidence source.
 - Overlap: the closest installed peer by instruction and resource fingerprint.
-- Impact: ablation result for general skills; protected-capability scoring for API and tool skills.
+- Impact: ablation result for general skills; missing ablation with no usage uses a low-evidence score; protected-capability scoring for API and tool skills.
 - Ablation planning: triage-only candidates, pairwise judging protocol, configurable early-stop rules, model-cost estimates, and expected reduction versus a full protocol.
 - Quality burden: over-triggering, high reference loading, bloated SKILL.md, overlong descriptions, bloated references/assets, weak progressive disclosure, vague resource names, suspicious bundled artifacts, executable assets, script failure and repair burden.
 - Static risk hints: shell execution, install hooks, packaging execution surfaces, network download, protected path access, private-looking bundled content, dynamic execution, and similar patterns. This is lint-style evidence, not a safety proof.

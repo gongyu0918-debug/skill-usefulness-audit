@@ -18,7 +18,7 @@ Score each skill with one local 10-point score, one final score, and side signal
 ## Core Outputs
 
 - `local_score = usage_score + uniqueness_score + impact_score`
-- `quality_penalty`: `0.0-2.0`
+- `quality_penalty`: `0.0-2.5`
 - `quality_penalty_uncapped`: raw quality burden before the cap
 - `final_score = clamp(local_score - quality_penalty, 0.0, 10.0)`
 - `usage_score`: `0.0-3.0`
@@ -129,7 +129,8 @@ Adjustments:
 - subtract `1.0` when `worse_rate > better_rate`
 - clamp the final impact score to `0.0-4.0`
 
-When ablation is missing, use a temporary neutral score of `2.0` and lower confidence.
+When ablation is missing, use low-evidence score `1.0` for zero-call skills.
+For skills with direct usage evidence but no ablation yet, keep temporary neutral score `2.0` and lower confidence.
 
 ### API and tool skills
 
@@ -163,7 +164,7 @@ Add:
 
 Clamp the final confidence score to `0.0-1.0`.
 
-## 5. Quality Penalty (`0.0-2.0`)
+## 5. Quality Penalty (`0.0-2.5`)
 
 Quality penalty captures the cost of keeping a skill even when it has some utility.
 It is a deduction from `local_score`, not a risk flag.
@@ -198,7 +199,7 @@ Scan installed skill files:
 - add `0.25-0.40` for scripts with placeholders, local absolute paths, or maintenance smells
 - add `0.50` for Python script syntax errors
 
-Clamp the combined penalty to `0.0-2.0`.
+Clamp the combined penalty to `0.0-2.5`.
 Emit `quality_flags`, `quality_evidence`, `resource_metrics`, `quality_penalty_uncapped`, and `score_breakdown.quality`.
 
 ## 6. Community Prior Score (`0.0-1.0`)

@@ -187,8 +187,8 @@ def ablation_priority(item: dict[str, object]) -> tuple[float, list[str]]:
         or float(item["quality_penalty"]) > 0
         or str(item["action"]) not in {"keep", "keep-narrow", "keep-system"}
     )
-    if cases >= 5 and not has_review_signal:
-        return 0, ["already has enough ablation cases"]
+    if not has_review_signal:
+        return 0, ["clean keep recommendation"]
 
     score = 0.0
     reasons: list[str] = []

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.18
+
+- 跳过无负面信号的 clean keep 技能，不再把它们写入 ablation 计划
+- 无调用且缺少 ablation 证据的 general skill 使用低证据 impact 分，避免中性分掩盖未验证状态；已有真实使用记录的技能保持中性兼容
+- quality burden 上限提升到 2.5，并在 Markdown 报告中展示 uncapped penalty
+- OpenClaw/ClawHub 发布包不再包含 Codex 专用 `agents/` 配置
+- README 和 scoring rubric 补充 action/verdict/risk 语义与 quality penalty 范围说明
+
 ## 0.2.17
 
 - 恢复 MIT-0 license 文件，并将同一 license 文件纳入 ClawHub/OpenClaw 发布包

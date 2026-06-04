@@ -956,6 +956,53 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
         self.assertIn("agent-repair-burden", item["quality_flags"])
         self.assertIn("quality", item["score_breakdown"])
 
+    def test_markdown_quality_burden_shows_uncapped_penalty(self) -> None:
+        skills_root = self.tempdir / "skills"
+        skill_dir = write_skill(
+            skills_root,
+            "uncapped-burden-helper",
+            "Use for any task, every request, always, and general purpose support.",
+            extra_body="Load only specific references when they are needed.",
+        )
+        for index in range(5):
+            (skill_dir / "references" / f"file{index}.md").write_text("reference notes\n", encoding="utf-8")
+        (skill_dir / "scripts" / "broken.py").write_text("def broken(:\n    pass\n", encoding="utf-8")
+
+        usage_path = self.tempdir / "usage.json"
+        usage_path.write_text(
+            json.dumps(
+                [
+                    {
+                        "name": "uncapped-burden-helper",
+                        "calls": 50,
+                        "executions": 1,
+                        "false_triggers": 20,
+                        "script_failures": 10,
+                        "repair_turns": 4,
+                        "reference_loads": 200,
+                    }
+                ]
+            ),
+            encoding="utf-8",
+        )
+        markdown_out = self.tempdir / "report.md"
+
+        payload = self.run_audit_json(
+            "--skills-root",
+            str(skills_root),
+            "--usage-file",
+            str(usage_path),
+            "--markdown-out",
+            str(markdown_out),
+        )
+
+        item = self.first_result(payload, "uncapped-burden-helper")
+        self.assertEqual(item["quality_penalty"], 2.5)
+        self.assertGreater(item["quality_penalty_uncapped"], item["quality_penalty"])
+        report = markdown_out.read_text(encoding="utf-8")
+        self.assertIn("| Skill | Burden | Uncapped | Flags | Evidence |", report)
+        self.assertIn(f"{item['quality_penalty_uncapped']:.1f}", report)
+
     def test_script_failure_rate_respects_explicit_zero_executions(self) -> None:
         evidence = AUDIT_MODULE.runtime_quality_evidence(
             {"calls": 50, "executions": 0, "script_failures": 5},
@@ -1468,6 +1515,8 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
         self.assertNotIn("## Host Compatibility", bundle_skill)
         self.assertNotIn("~/.hermes/skills", bundle_skill)
         self.assertNotIn("~/.claude/skills", bundle_skill)
+        self.assertFalse((isolated_repo / "skill" / "agents").exists())
+        self.assertFalse((isolated_repo / "skill" / "agents" / "openai.yaml").exists())
         bundle_text_parts = []
         for path in (isolated_repo / "skill").rglob("*"):
             if path.is_file() and path.suffix.lower() in SYNC_MODULE.TEXT_SUFFIXES:
@@ -1537,6 +1586,18 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
         self.assertTrue(item["action_advice"].endswith("."))
         self.assertEqual(item["final_score"], item["local_score"])
 
+    def test_general_skill_missing_ablation_gets_low_evidence_impact(self) -> None:
+        skills_root = self.tempdir / "skills"
+        write_skill(skills_root, "bare-general-helper", "Rewrite notes into a concise summary.")
+
+        payload = self.run_audit_json("--skills-root", str(skills_root))
+
+        item = self.first_result(payload, "bare-general-helper")
+        self.assertEqual(item["kind"], "general")
+        self.assertEqual(item["impact_score"], 1.0)
+        self.assertEqual(item["local_score"], 4.0)
+        self.assertEqual(item["action"], "observe-30d")
+
     def test_ablation_plan_prioritizes_candidates_and_estimates_cost_savings(self) -> None:
         skills_root = self.tempdir / "skills"
         write_skill(skills_root, "tone-polisher", "Rewrite text with polished tone and softer phrasing.")
@@ -1581,6 +1642,32 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
         self.assertIn("tone-polisher", candidate_names)
         self.assertIn("overtrigger-helper", candidate_names)
         self.assertEqual(plan["accuracy_tradeoff"]["expected_accuracy_impact"], "low")
+
+    def test_ablation_plan_skips_clean_keep_general_skills(self) -> None:
+        skills_root = self.tempdir / "skills"
+        write_skill(skills_root, "clean-keeper", "Structure project notes into clean summaries.")
+
+        usage_path = self.tempdir / "usage.json"
+        usage_path.write_text(
+            json.dumps([{"name": "clean-keeper", "calls": 20, "recent_30d_calls": 12}]),
+            encoding="utf-8",
+        )
+        plan_out = self.tempdir / "ablation-plan.json"
+
+        payload = self.run_audit_json(
+            "--skills-root",
+            str(skills_root),
+            "--usage-file",
+            str(usage_path),
+            "--ablation-plan-out",
+            str(plan_out),
+        )
+        plan = json.loads(plan_out.read_text(encoding="utf-8"))
+
+        item = self.first_result(payload, "clean-keeper")
+        self.assertIn(item["action"], {"keep", "keep-narrow"})
+        self.assertEqual(item["quality_penalty"], 0.0)
+        self.assertEqual(plan["candidate_skills"], 0)
 
     def test_ablation_plan_can_refresh_stale_existing_cases_with_burden(self) -> None:
         skills_root = self.tempdir / "skills"

@@ -400,6 +400,7 @@ def run_audit(args: argparse.Namespace) -> int:
             [
                 str(item["display_name"]),
                 f"{item['quality_penalty']:.1f}",
+                f"{item['quality_penalty_uncapped']:.1f}",
                 short_risk_flags(list(item["quality_flags"])),
                 summarize_quality_evidence(list(item["quality_evidence"])),
             ]
@@ -411,7 +412,7 @@ def run_audit(args: argparse.Namespace) -> int:
                 "",
                 "## Quality Burden",
                 "",
-                markdown_table(["Skill", "Burden", "Flags", "Evidence"], quality_rows),
+                markdown_table(["Skill", "Burden", "Uncapped", "Flags", "Evidence"], quality_rows),
             ]
         )
 

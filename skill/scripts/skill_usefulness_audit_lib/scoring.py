@@ -112,7 +112,7 @@ def impact_score(
         return max(0.0, min(4.0, round(score, 2)))
 
     if not ablation or ablation.get("cases", 0) <= 0:
-        return 2.0
+        return 1.0 if calls <= 0 else 2.0
 
     consistency = ablation["consistency_rate"]
     better = ablation["better_rate"]
@@ -275,7 +275,7 @@ def quality_penalty(
     evidence.extend(readiness_quality_evidence(skill))
     evidence.extend(runtime_quality_evidence(usage_record, ablation))
     penalty_uncapped = round(sum(float(item["penalty"]) for item in evidence), 2)
-    penalty = round(clamp(penalty_uncapped, 0.0, 2.0), 2)
+    penalty = round(clamp(penalty_uncapped, 0.0, 2.5), 2)
     return {
         "penalty": penalty,
         "penalty_uncapped": penalty_uncapped,
