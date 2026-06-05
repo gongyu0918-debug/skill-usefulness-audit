@@ -17,6 +17,21 @@ The skill follows the AgentSkills folder layout used by OpenClaw, Hermes, Claude
 
 When manually installing into Hermes or Claude Code, keep the target folder name as `skill-usefulness-audit`.
 
+## Safe First Run
+
+Start with an inventory-only report:
+
+```bash
+python codex-skill/scripts/skill_usefulness_audit.py audit \
+  --markdown-out skill-audit-report.md \
+  --json-out skill-audit-report.json
+```
+
+This mode is `structure-only`. Use it to find broken scripts, bloated references, vague routing, private-looking artifacts, and static risk hints.
+
+Do not delete skills based only on a structure-only report.
+For cleanup decisions, rerun with real `--usage-file`; for general skills near the delete/merge boundary, generate an ablation plan and add `--ablation-file` results.
+
 ## Quick Start
 
 Audit your local Codex skills:
@@ -90,6 +105,29 @@ The tool works with no extra files, but direct evidence gives better results.
 | `--community-file` | JSON, JSONL, CSV, TSV | `rating`, `downloads`, `installs_current`, `installs_all_time`, `trending_7d`, `stars`, `comments_count`, `last_updated` |
 | `--ablation-plan-out` | JSON | cost-efficient ablation plan with candidate skills, early-stop rules, and model-cost estimates |
 
+Minimal `usage.json`:
+
+```json
+[
+  {
+    "name": "pdf-helper",
+    "calls": 12,
+    "recent_30d_calls": 4,
+    "last_used_at": "2026-06-01",
+    "executions": 10,
+    "script_failures": 1,
+    "reference_loads": 6,
+    "false_triggers": 0
+  }
+]
+```
+
+This tool does not automatically replay historical conversations. It creates an ablation plan and reads ablation result files that you provide.
+
+History and usage files may contain sensitive conversations, local paths, project names, and customer data. Prefer local execution and redact secrets before sharing reports. JSON output may include local paths and evidence notes.
+
+Missing env means not configured in the current audit process, not proof that the skill is broken in every host.
+
 Planning defaults are `3` initial cases, expand to `5`, cap at `10`, and compare against a `10` case full protocol. Tune them with `--ablation-initial-cases`, `--ablation-expand-cases`, `--ablation-max-cases`, and `--ablation-baseline-cases`.
 
 Duplicate skill names resolve through `path`, `namespace`, and `source`. If an input file only provides a name and that name appears in several installed roots, the report keeps the evidence conservative and adds an `evidence_note`.
@@ -133,5 +171,5 @@ python codex-skill/scripts/skill_usefulness_audit.py audit \
 
 ```bash
 python scripts/sync_bundle.py
-clawhub publish ./skill --slug skill-usefulness-audit --name "skill-usefulness-audit" --version 0.2.17 --tags latest,audit,skills,openclaw --changelog "Restore MIT-0 license files in the GitHub repository and OpenClaw bundle"
+clawhub publish ./skill --slug skill-usefulness-audit --name "skill-usefulness-audit" --version 0.3.0 --tags latest,audit,skills,openclaw --changelog "Add safe-first-run docs, strict input validation, version output, and no-skills diagnostics"
 ```

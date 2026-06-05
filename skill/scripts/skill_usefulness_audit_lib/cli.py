@@ -9,14 +9,37 @@ from .scoring import *
 from .reporting import *
 from .usage_loader import *
 
-def existing_paths(label: str, raw_paths: list[str] | None) -> list[Path]:
+def cli_version() -> str:
+    module_path = Path(__file__).resolve()
+    roots = list(module_path.parents)
+    for root in roots:
+        version_path = root / "VERSION"
+        if version_path.exists():
+            return read_text(version_path).strip()
+    for root in roots:
+        skill_path = root / "SKILL.md"
+        if not skill_path.exists():
+            continue
+        frontmatter, _body = parse_frontmatter(read_text(skill_path))
+        version = str(frontmatter.get("version", "") or "").strip()
+        if version:
+            return version
+    return "unknown"
+
+
+def existing_paths(label: str, raw_paths: list[str] | None, strict: bool = False) -> list[Path] | None:
     paths = [Path(item).expanduser().resolve() for item in (raw_paths or [])]
     existing: list[Path] = []
+    missing = False
     for path in paths:
         if path.exists():
             existing.append(path)
             continue
-        print(f"warning: {label} file not found: {path}", file=sys.stderr)
+        missing = True
+        level = "error" if strict else "warning"
+        print(f"{level}: {label} file not found: {path}", file=sys.stderr)
+    if strict and missing:
+        return None
     return existing
 
 
@@ -27,15 +50,22 @@ def run_audit(args: argparse.Namespace) -> int:
     skill_files = discover_skill_files(roots, args.include_system)
     if not skill_files:
         print("No skills found.", file=sys.stderr)
+        print("Searched roots:", file=sys.stderr)
+        for root in roots:
+            print(f"- {root}", file=sys.stderr)
+        print("Expected skill files named SKILL.md under each skill directory.", file=sys.stderr)
+        print("Pass --skills-root PATH for custom install locations.", file=sys.stderr)
         return 1
 
     skills = [scan_skill(path) for path in skill_files]
     names = [skill["name"] for skill in skills]
     alias_counts = Counter(key for skill in skills for key in skill_lookup_keys(skill))
-    usage_paths = existing_paths("usage", args.usage_file)
-    history_paths = existing_paths("history", args.history_file)
-    ablation_paths = existing_paths("ablation", args.ablation_file)
-    community_paths = existing_paths("community", args.community_file)
+    usage_paths = existing_paths("usage", args.usage_file, args.strict_inputs)
+    history_paths = existing_paths("history", args.history_file, args.strict_inputs)
+    ablation_paths = existing_paths("ablation", args.ablation_file, args.strict_inputs)
+    community_paths = existing_paths("community", args.community_file, args.strict_inputs)
+    if usage_paths is None or history_paths is None or ablation_paths is None or community_paths is None:
+        return 2
 
     usage = load_usage(usage_paths) if usage_paths else {}
     history_usage = infer_usage_from_history(history_paths, names) if history_paths else {}
@@ -547,6 +577,7 @@ def run_audit(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Audit installed skill usefulness.")
+    parser.add_argument("--version", action="version", version=f"skill-usefulness-audit {cli_version()}")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     audit_parser = subparsers.add_parser("audit", help="Audit skills and render a report.")
@@ -558,6 +589,11 @@ def build_parser() -> argparse.ArgumentParser:
     audit_parser.add_argument("--markdown-out", help="Write the Markdown report to this file.")
     audit_parser.add_argument("--json-out", help="Write machine-readable JSON output to this file.")
     audit_parser.add_argument("--ablation-plan-out", help="Write a cost-efficient ablation plan JSON file.")
+    audit_parser.add_argument(
+        "--strict-inputs",
+        action="store_true",
+        help="Fail instead of warning when any usage/history/ablation/community input file is missing.",
+    )
     audit_parser.add_argument(
         "--ablation-plan-max-candidates",
         type=int,

@@ -1361,6 +1361,59 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
 
         self.assertIn("warning: usage file not found", result.stderr.lower())
 
+    def test_strict_inputs_fail_on_missing_usage_file(self) -> None:
+        skills_root = self.tempdir / "skills"
+        write_skill(skills_root, "emotion-orchestrator", "Detect emotion and route reply style.")
+
+        missing_usage = self.tempdir / "usge.json"
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(AUDIT_SCRIPT),
+                "audit",
+                "--skills-root",
+                str(skills_root),
+                "--usage-file",
+                str(missing_usage),
+                "--strict-inputs",
+            ],
+            cwd=REPO_ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("error: usage file not found", result.stderr.lower())
+
+    def test_no_skills_found_reports_roots(self) -> None:
+        empty_root = self.tempdir / "empty-skills"
+        empty_root.mkdir()
+
+        result = subprocess.run(
+            [sys.executable, str(AUDIT_SCRIPT), "audit", "--skills-root", str(empty_root)],
+            cwd=REPO_ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("No skills found.", result.stderr)
+        self.assertIn(str(empty_root.resolve()), result.stderr)
+        self.assertIn("Expected skill files named SKILL.md", result.stderr)
+
+    def test_version_flag_reports_version(self) -> None:
+        result = subprocess.run(
+            [sys.executable, str(AUDIT_SCRIPT), "--version"],
+            cwd=REPO_ROOT,
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+
+        self.assertIn(CURRENT_VERSION, result.stdout)
+
     def test_normalize_pathish_preserves_case_when_normcase_does(self) -> None:
         upper_path = self.tempdir / "Foo" / "skill"
         lower_path = self.tempdir / "foo" / "skill"
@@ -1507,7 +1560,7 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
         bundle_script = (isolated_repo / "skill" / "scripts" / "skill_usefulness_audit.py").read_text(encoding="utf-8")
         self.assertIn("slug: skill-usefulness-audit", bundle_skill)
         self.assertIn(f"version: {CURRENT_VERSION}", bundle_skill)
-        self.assertIn("Audits installed agent skills for usage, overlap, burden, risk, and missing evidence", bundle_skill)
+        self.assertIn("Audit installed agent-skill packages for cleanup", bundle_skill)
         self.assertIn('"requires":{"bins":["python"]}', bundle_skill)
         self.assertNotIn('"requires_toolsets":["terminal"]', bundle_skill)
         self.assertNotIn("Hermes", bundle_skill)
@@ -1556,6 +1609,21 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
             text=True,
             capture_output=True,
         )
+
+    def test_readme_and_skill_document_safe_first_run_boundaries(self) -> None:
+        readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+        source_skill = (REPO_ROOT / "codex-skill" / "SKILL.md").read_text(encoding="utf-8")
+        bundle_skill = (REPO_ROOT / "skill" / "SKILL.md").read_text(encoding="utf-8")
+
+        for text in (readme, source_skill, bundle_skill):
+            self.assertIn("Do not delete skills based only on a structure-only report.", text)
+            self.assertIn("does not automatically replay historical conversations", text)
+            self.assertIn("History and usage files may contain sensitive conversations", text)
+            self.assertIn("Missing env means not configured in the current audit process", text)
+
+        self.assertIn("## Safe First Run", readme)
+        self.assertIn('"recent_30d_calls": 4', readme)
+        self.assertIn("not for code review or human skills", bundle_skill)
 
     def test_markdown_table_escapes_headers(self) -> None:
         table = AUDIT_MODULE.markdown_table(["A|B"], [["1|2"]])
@@ -1741,6 +1809,7 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
     def test_structure_only_report_mode_without_evidence_files(self) -> None:
         skills_root = self.tempdir / "skills"
         write_skill(skills_root, "prompt-helper", "Rewrite prompts for clearer task execution.")
+        write_skill(skills_root, "prompt-helper-copy", "Rewrite prompts for clearer task execution.")
 
         payload = self.run_audit_json(
             "--skills-root",
@@ -1748,6 +1817,10 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
         )
 
         self.assertEqual(payload["report_mode"], "structure-only")
+        self.assertEqual(payload["delete_candidates"], 0)
+        for item in payload["results"]:
+            self.assertNotIn(item["action"], {"delete", "merge-delete"})
+            self.assertFalse(item["delete_candidate"])
 
     def test_output_directories_are_created(self) -> None:
         skills_root = self.tempdir / "skills"

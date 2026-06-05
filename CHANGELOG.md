@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.0
+
+- Add `--version` and `--strict-inputs` CLI guards for safer local runs
+- Show searched roots and expected `SKILL.md` layout when no skills are found
+- Narrow skill routing copy to installed agent-skill package cleanup, not code review or human skills
+- Add Safe First Run, ablation boundary, usage sample, privacy, and missing-env caveats to README/SKILL docs
+
 ## 0.2.18
 
 - 跳过无负面信号的 clean keep 技能，不再把它们写入 ablation 计划

@@ -1,6 +1,6 @@
 ---
 name: skill-usefulness-audit
-description: Audits installed agent skills for usage, overlap, burden, risk, and missing evidence. Use only when the user asks to audit, clean up, merge, delete, or review skills.
+description: Audit installed agent-skill packages for cleanup using usage, overlap, burden, risk, and optional ablation/community evidence. Trigger only on explicit requests to review installed agent skills; not for code review or human skills.
 compatibility: AgentSkills-compatible; tested for Codex, OpenClaw, Hermes, and Claude Code. Requires Python 3.10+ for the bundled audit script.
 tags: ["audit","skills","ablation","agent-skills"]
 user-invocable: true
@@ -20,6 +20,14 @@ It turns vague "this feels useless" opinions into a repeatable audit based on us
 
 Run this skill only after a direct user request.
 Do not invoke it implicitly during normal task execution.
+Do not use it for general code review, general security audit, employee skill assessment, or normal task execution.
+
+## Safety
+
+Never delete or quarantine skills automatically.
+Treat all `delete`, `merge-delete`, and `quarantine-review` results as manual-review recommendations.
+Do not delete skills based only on a structure-only report.
+This tool does not automatically replay historical conversations; it generates ablation plans and reads ablation result files that the user provides.
 
 ## Host Compatibility
 
@@ -38,7 +46,7 @@ Audit these layers in order:
 1. Usage evidence with recency and source quality.
 2. Installed skill metadata and instructions.
 3. Functional overlap across skills.
-4. Ablation impact on historical conversations for non-API and non-tool skills.
+4. Ablation impact from user-provided skill-on versus skill-off results for non-API and non-tool skills.
 5. Quality burden from over-triggering, context-heavy resources, weak progressive disclosure, redundant references/assets, weak scripts, or private-looking bundled files.
 6. Static health and risk signals.
 7. Optional offline community or registry metrics.
@@ -87,6 +95,9 @@ Examples: Excel, DOCX, PDF, browser automation, deployment, OCR, external API wr
 
 Read `references/ablation-protocol.md` before running ablation.
 
+This tool does not automatically replay historical conversations.
+It creates an ablation plan and reads normalized ablation result files provided by the user.
+
 For each eligible skill:
 
 - Generate the ablation plan first.
@@ -128,6 +139,9 @@ Input contracts:
 
 Run without extra files only when you need a structure-only audit.
 Usage, community, and ablation evidence become lower-confidence in that mode.
+Do not delete skills based only on a structure-only report.
+History and usage files may contain sensitive conversations, local paths, project names, and customer data.
+Missing env means not configured in the current audit process, not proof that the skill is broken in every host.
 
 ## Output Contract
 
@@ -146,8 +160,8 @@ Always include these JSON fields:
 
 - `report_mode`: `strong-evidence`, `partial-evidence`, or `structure-only`.
 - `score_breakdown`: per-skill usage, uniqueness, impact, community, static risk, quality, and confidence details.
-- `quality_penalty`: `0.0-2.0` deduction from `local_score`.
-- `quality_penalty_uncapped`: raw quality burden before the `2.0` cap.
+- `quality_penalty`: `0.0-2.5` deduction from `local_score`.
+- `quality_penalty_uncapped`: raw quality burden before the `2.5` cap.
 - `quality_evidence`: concrete burden flags and evidence.
 - `community_breakdown`: registry signal components when community data is present.
 - `ablation_plan`: cost-efficient plan with candidate skills, model-cost estimates, stop rules, and expected accuracy impact.
