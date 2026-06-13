@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.1
+
+- Avoid double-counting Python subprocess calls across regex and AST risk checks
+- Promote bundled credential-like content into risk review instead of only quality burden
+- Cap broken script/tool skills below keep tier when syntax errors or high failure rates are present
+- Show `insufficient-evidence` verdict for low-confidence low-score skills instead of a delete-looking verdict
+- Read each risk-scanned file once per pass
+
 ## 0.3.0
 
 - Add `--version` and `--strict-inputs` CLI guards for safer local runs

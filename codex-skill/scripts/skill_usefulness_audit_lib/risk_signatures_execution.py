@@ -24,8 +24,6 @@ EXECUTION_RISK_RULES = (
         "label": "shell-exec",
         "severity": 1.0,
         "patterns": (
-            r"subprocess\.(?:run|popen)\s*\(",
-            r"os\.system\s*\(",
             r"shell\s*=\s*true",
             r"child_process\.(?:exec|spawn)\s*\(",
         ),

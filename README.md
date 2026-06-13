@@ -171,5 +171,5 @@ python codex-skill/scripts/skill_usefulness_audit.py audit \
 
 ```bash
 python scripts/sync_bundle.py
-clawhub publish ./skill --slug skill-usefulness-audit --name "skill-usefulness-audit" --version 0.3.0 --tags latest,audit,skills,openclaw --changelog "Add safe-first-run docs, strict input validation, version output, and no-skills diagnostics"
+clawhub publish ./skill --slug skill-usefulness-audit --name "skill-usefulness-audit" --version 0.3.1 --tags latest,audit,skills,openclaw --changelog "Fix risk scoring, credential risk escalation, broken-script health caps, and low-evidence verdicts"
 ```

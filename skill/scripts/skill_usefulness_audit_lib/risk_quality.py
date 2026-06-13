@@ -32,6 +32,29 @@ def add_risk_hit(hits: dict[str, dict[str, object]], label: str, severity: float
         files.append(relative)
 
 
+def risk_result_from_hits(hits: dict[str, dict[str, object]]) -> dict[str, object]:
+    risk_score = round(sum(float(item["severity"]) for item in hits.values()), 2)
+    if risk_score >= 4.0:
+        risk_level = "high"
+    elif risk_score >= 2.0:
+        risk_level = "medium"
+    elif risk_score > 0:
+        risk_level = "low"
+    else:
+        risk_level = "none"
+
+    evidence = [
+        {"label": label, "severity": item["severity"], "files": item["files"]}
+        for label, item in sorted(hits.items())
+    ]
+    return {
+        "risk_score": risk_score,
+        "risk_level": risk_level,
+        "risk_flags": [item["label"] for item in evidence],
+        "risk_evidence": evidence,
+    }
+
+
 def python_exec_call_labels(text: str) -> set[str]:
     try:
         tree = ast.parse(text)
@@ -124,38 +147,47 @@ def scan_risk(
                 continue
         except OSError:
             continue
-        text = read_text(path).lower()
+        text = read_text(path)
+        text_lower = text.lower()
         for rule in COMPILED_RISK_RULES:
-            if any(pattern.search(text) for pattern in rule["patterns"]):
-                add_risk_hit(hits, str(rule["label"]), float(rule["severity"]), relative)
+            label = str(rule["label"])
+            if path.suffix.lower() == ".py" and label == "shell-exec":
+                continue
+            if any(pattern.search(text_lower) for pattern in rule["patterns"]):
+                add_risk_hit(hits, label, float(rule["severity"]), relative)
         if path.suffix.lower() == ".py":
-            for label in python_exec_call_labels(read_text(path)):
+            for label in python_exec_call_labels(text):
                 severity = 2.0 if label == "dynamic-exec" else 1.0
                 add_risk_hit(hits, label, severity, relative)
-        for label in install_surface_labels(path, relative, read_text(path)):
+        for label in install_surface_labels(path, relative, text):
             severity = 2.0 if label == "install-hook" else 1.0
             add_risk_hit(hits, label, severity, relative)
 
-    risk_score = round(sum(float(item["severity"]) for item in hits.values()), 2)
-    if risk_score >= 4.0:
-        risk_level = "high"
-    elif risk_score >= 2.0:
-        risk_level = "medium"
-    elif risk_score > 0:
-        risk_level = "low"
-    else:
-        risk_level = "none"
+    return risk_result_from_hits(hits)
 
-    evidence = [
-        {"label": label, "severity": item["severity"], "files": item["files"]}
-        for label, item in sorted(hits.items())
-    ]
-    return {
-        "risk_score": risk_score,
-        "risk_level": risk_level,
-        "risk_flags": [item["label"] for item in evidence],
-        "risk_evidence": evidence,
-    }
+
+def promote_private_content_risk(risk: dict[str, object], quality: dict[str, object]) -> dict[str, object]:
+    hits: dict[str, dict[str, object]] = {}
+    for item in risk.get("risk_evidence", []):
+        if not isinstance(item, dict):
+            continue
+        label = str(item.get("label", "") or "")
+        if not label:
+            continue
+        hits[label] = {
+            "severity": float(item.get("severity", 0.0) or 0.0),
+            "files": list(item.get("files", []) or [])[:3],
+        }
+    for item in quality.get("static_quality_evidence", []):
+        if not isinstance(item, dict) or item.get("label") != "private-content-artifact":
+            continue
+        files = list(item.get("files", []) or [])
+        if files:
+            for relative in files[:3]:
+                add_risk_hit(hits, "private-content-artifact", 4.0, str(relative))
+        else:
+            add_risk_hit(hits, "private-content-artifact", 4.0, "bundle")
+    return risk_result_from_hits(hits)
 
 
 def relative_label(root: Path, path: Path) -> str:
@@ -596,6 +628,7 @@ def scan_skill(skill_md: Path) -> dict[str, object]:
     )
     risk = scan_risk(root, self_relative_path=self_relative_path, ignored_relative_paths=ignored_relative_paths)
     quality = scan_static_quality(root, description, body, quality_script_paths, reference_metrics, asset_metrics)
+    risk = promote_private_content_risk(risk, quality)
     return {
         "name": name,
         "slug": slug,

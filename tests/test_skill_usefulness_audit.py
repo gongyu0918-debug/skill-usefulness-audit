@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from collections import Counter
 from datetime import date
 from pathlib import Path
 from unittest import mock
@@ -510,6 +511,23 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
         item = self.first_result(payload, "private-content-helper")
         self.assertIn("private-content-artifact", item["quality_flags"])
         self.assertNotIn(marker, json.dumps(item, ensure_ascii=False))
+
+    def test_private_content_artifact_escalates_static_risk(self) -> None:
+        skills_root = self.tempdir / "skills"
+        skill_dir = write_skill(skills_root, "leaky-skill", "Call an API with local helper scripts.")
+        (skill_dir / "scripts" / "config.py").write_text(
+            "api_token = 'PLACEHOLDER_VALUE_1234567890_DEMO'\n",
+            encoding="utf-8",
+        )
+
+        payload = self.run_audit_json("--skills-root", str(skills_root))
+
+        item = self.first_result(payload, "leaky-skill")
+        self.assertIn("private-content-artifact", item["quality_flags"])
+        self.assertIn("private-content-artifact", item["risk_flags"])
+        self.assertEqual(item["risk_level"], "high")
+        self.assertEqual(item["action"], "quarantine-review")
+        self.assertFalse(item["delete_candidate"])
 
     def test_static_quality_burden_flags_disclosure_gap_vague_names_and_bad_python(self) -> None:
         skills_root = self.tempdir / "skills"
@@ -1063,6 +1081,23 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
         self.assertIn("script-exec-call", item["risk_flags"])
         self.assertIn("child process", item["risk_review"])
 
+    def test_python_subprocess_is_not_double_counted_by_regex_and_ast(self) -> None:
+        skills_root = self.tempdir / "skills"
+        skill_dir = write_skill(skills_root, "python-subprocess-runner", "Run one local Python helper.")
+        (skill_dir / "scripts" / "runner.py").write_text(
+            "import subprocess\n"
+            "subprocess.run('echo ok', shell=True, check=False)\n",
+            encoding="utf-8",
+        )
+
+        payload = self.run_audit_json("--skills-root", str(skills_root))
+
+        item = self.first_result(payload, "python-subprocess-runner")
+        self.assertIn("script-exec-call", item["risk_flags"])
+        self.assertNotIn("shell-exec", item["risk_flags"])
+        self.assertEqual(item["risk_score"], 1.0)
+        self.assertEqual(item["risk_level"], "low")
+
     def test_risk_scan_ignores_documentation_only_markers(self) -> None:
         skills_root = self.tempdir / "skills"
         write_skill(
@@ -1151,6 +1186,23 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
             AUDIT_MODULE.scan_skill(skill_dir / "SKILL.md")
 
         self.assertEqual(skill_md_reads, 1)
+
+    def test_scan_risk_reads_each_script_once(self) -> None:
+        skills_root = self.tempdir / "skills"
+        skill_dir = write_skill(skills_root, "single-risk-read-skill", "Run one local helper.")
+        script = skill_dir / "scripts" / "run.py"
+        script.write_text("import subprocess\nsubprocess.run(['echo', 'ok'], check=False)\n", encoding="utf-8")
+        original_read_text = AUDIT_MODULE.read_text
+        reads: Counter[str] = Counter()
+
+        def counting_read_text(path: Path) -> str:
+            reads[str(Path(path).resolve())] += 1
+            return original_read_text(path)
+
+        with mock.patch.object(AUDIT_MODULE._risk_quality, "read_text", side_effect=counting_read_text):
+            AUDIT_MODULE.scan_risk(skill_dir)
+
+        self.assertEqual(reads[str(script.resolve())], 1)
 
     def test_scan_risk_can_skip_current_script_by_relative_path(self) -> None:
         skill_dir = self.tempdir / "renamed-audit-skill"
@@ -1820,7 +1872,41 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
         self.assertEqual(payload["delete_candidates"], 0)
         for item in payload["results"]:
             self.assertNotIn(item["action"], {"delete", "merge-delete"})
+            self.assertEqual(item["verdict"], "insufficient-evidence")
             self.assertFalse(item["delete_candidate"])
+
+    def test_broken_tool_skill_is_capped_below_keep_tier(self) -> None:
+        skills_root = self.tempdir / "skills"
+        skill_dir = write_skill(skills_root, "broken-pdf-tool", "Convert PDF files with a local Python script.")
+        (skill_dir / "scripts" / "broken.py").write_text("def broken(:\n    pass\n", encoding="utf-8")
+        usage_path = self.tempdir / "usage.json"
+        usage_path.write_text(
+            json.dumps(
+                [
+                    {
+                        "name": "broken-pdf-tool",
+                        "calls": 9,
+                        "executions": 9,
+                        "script_failures": 6,
+                    }
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        payload = self.run_audit_json(
+            "--skills-root",
+            str(skills_root),
+            "--usage-file",
+            str(usage_path),
+        )
+
+        item = self.first_result(payload, "broken-pdf-tool")
+        self.assertEqual(item["kind"], "tool")
+        self.assertIn("script-syntax-error", item["quality_flags"])
+        self.assertIn("script-failure-burden", item["quality_flags"])
+        self.assertLessEqual(item["final_score"], 4.0)
+        self.assertNotIn(item["action"], {"keep", "keep-narrow", "keep-review-burden"})
 
     def test_output_directories_are_created(self) -> None:
         skills_root = self.tempdir / "skills"

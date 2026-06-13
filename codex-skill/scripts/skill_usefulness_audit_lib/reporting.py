@@ -12,6 +12,7 @@ RISK_REVIEW_GUIDANCE = {
     "network-download": "The skill downloads remote content; confirm it is pinned and trusted.",
     "packaging-exec-surface": "Packaging files can execute local build code; inspect before installing.",
     "protected-path-access": "The skill references private local paths; review whether that access is necessary.",
+    "private-content-artifact": "The bundle appears to contain credential-like content; remove or rotate it before trusting the skill.",
     "script-exec-call": "The script invokes a child process; inspect the called command and arguments.",
 }
 

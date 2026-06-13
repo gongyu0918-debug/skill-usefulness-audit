@@ -284,6 +284,18 @@ def quality_penalty(
     }
 
 
+def health_cap_from_quality(evidence: list[dict[str, object]]) -> float | None:
+    labels = {str(item.get("label", "")) for item in evidence}
+    if "script-syntax-error" in labels:
+        return 4.0
+    for item in evidence:
+        if item.get("label") != "script-failure-burden":
+            continue
+        if float(item.get("penalty", 0.0) or 0.0) >= 0.45:
+            return 4.0
+    return None
+
+
 def confidence_score(
     usage_source: str,
     usage_record: dict[str, object],
@@ -318,7 +330,9 @@ def confidence_score(
     return round(clamp(score, 0.0, 1.0), 2)
 
 
-def verdict(total: float) -> str:
+def verdict(total: float, confidence: float | None = None) -> str:
+    if confidence is not None and confidence < 0.55 and total < 4.5:
+        return "insufficient-evidence"
     if total >= 8.0:
         return "keep"
     if total >= 6.0:

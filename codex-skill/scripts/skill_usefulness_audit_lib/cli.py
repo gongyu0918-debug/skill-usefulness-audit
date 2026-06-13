@@ -119,7 +119,10 @@ def run_audit(args: argparse.Namespace) -> int:
         quality_penalty_value = float(quality["penalty"])
         quality_penalty_uncapped = float(quality["penalty_uncapped"])
         quality_flags = list(quality["flags"])  # type: ignore[arg-type]
-        final = round(clamp(total - quality_penalty_value, 0.0, 10.0), 2)
+        pre_health_cap_final = round(clamp(total - quality_penalty_value, 0.0, 10.0), 2)
+        health_cap = health_cap_from_quality(list(quality["evidence"]))  # type: ignore[arg-type]
+        final = min(pre_health_cap_final, health_cap) if health_cap is not None else pre_health_cap_final
+        final = round(final, 2)
         confidence = confidence_score(
             usage_source,
             usage_record,
@@ -184,6 +187,8 @@ def run_audit(args: argparse.Namespace) -> int:
                 "penalty": quality_penalty_value,
                 "penalty_uncapped": quality_penalty_uncapped,
                 "flags": quality_flags,
+                "pre_health_cap_final": pre_health_cap_final,
+                "health_cap": health_cap,
                 "resource_metrics": skill["resource_metrics"],
                 "required_env": skill.get("required_env"),
                 "missing_required_env": skill.get("missing_required_env"),
@@ -239,7 +244,7 @@ def run_audit(args: argparse.Namespace) -> int:
                 "resource_metrics": skill["resource_metrics"],
                 "final_score": final,
                 "confidence_score": confidence,
-                "verdict": verdict(final),
+                "verdict": verdict(final, confidence),
                 "action": action,
                 "action_reason": action_reason,
                 "action_advice": advice,
