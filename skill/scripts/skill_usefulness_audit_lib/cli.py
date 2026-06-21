@@ -298,14 +298,16 @@ def run_audit(args: argparse.Namespace) -> int:
     )
     missing = [item for item in ranked if item["missing_usage"] or item["missing_ablation"] or item["missing_community"]]
     report_mode = determine_report_mode(usage_paths, history_paths, ablation_paths, ranked)
-    ablation_plan = build_ablation_plan(
-        ranked,
-        max_candidates=int(args.ablation_plan_max_candidates),
-        baseline_cases_per_skill=int(args.ablation_baseline_cases),
-        initial_cases_per_candidate=int(args.ablation_initial_cases),
-        expand_to_cases=int(args.ablation_expand_cases),
-        max_cases_per_candidate=int(args.ablation_max_cases),
-    )
+    ablation_plan = None
+    if args.ablation_plan_out:
+        ablation_plan = build_ablation_plan(
+            ranked,
+            max_candidates=int(args.ablation_plan_max_candidates),
+            baseline_cases_per_skill=int(args.ablation_baseline_cases),
+            initial_cases_per_candidate=int(args.ablation_initial_cases),
+            expand_to_cases=int(args.ablation_expand_cases),
+            max_cases_per_candidate=int(args.ablation_max_cases),
+        )
 
     score_rows = []
     for index, item in enumerate(ranked, start=1):
@@ -371,7 +373,7 @@ def run_audit(args: argparse.Namespace) -> int:
         ),
     ]
 
-    if ablation_plan["candidate_skills"]:
+    if ablation_plan and ablation_plan["candidate_skills"]:
         expected_reduction = ablation_plan["model_cost_estimates"]["planned_expected"]["reduction_vs_baseline_percent"]  # type: ignore[index]
         realistic_reduction = expected_reduction["realistic"]  # type: ignore[index]
         baseline_policy = ablation_plan["case_policy"]["baseline_cases_per_general_skill"]  # type: ignore[index]
@@ -559,9 +561,10 @@ def run_audit(args: argparse.Namespace) -> int:
             "report_mode": report_mode,
             "recommended_actions": len(recommended_actions),
             "delete_candidates": len(delete_candidates),
-            "ablation_plan": ablation_plan,
             "results": ranked,
         }
+        if ablation_plan is not None:
+            payload["ablation_plan"] = ablation_plan
         json_path = Path(args.json_out).expanduser().resolve()
         json_path.parent.mkdir(parents=True, exist_ok=True)
         json_path.write_text(
@@ -570,6 +573,7 @@ def run_audit(args: argparse.Namespace) -> int:
         )
 
     if args.ablation_plan_out:
+        assert ablation_plan is not None
         plan_path = Path(args.ablation_plan_out).expanduser().resolve()
         plan_path.parent.mkdir(parents=True, exist_ok=True)
         plan_path.write_text(

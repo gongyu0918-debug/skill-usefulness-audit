@@ -6,8 +6,8 @@ import os
 import shutil
 import subprocess
 import sys
-import tempfile
 import unittest
+import uuid
 from collections import Counter
 from datetime import date
 from pathlib import Path
@@ -18,6 +18,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 AUDIT_SCRIPT = REPO_ROOT / "codex-skill" / "scripts" / "skill_usefulness_audit.py"
 SYNC_SCRIPT = REPO_ROOT / "scripts" / "sync_bundle.py"
 CURRENT_VERSION = (REPO_ROOT / "VERSION").read_text(encoding="utf-8").strip()
+TEST_TMP_ROOT = Path(os.environ.get("SKILL_AUDIT_TEST_TMPDIR", REPO_ROOT / ".test-tmp")).resolve()
 
 
 def load_module(path: Path, module_name: str):
@@ -49,12 +50,47 @@ def write_skill(root: Path, name: str, description: str, extra_body: str = "") -
     return skill_dir
 
 
+def make_test_tempdir() -> Path:
+    TEST_TMP_ROOT.mkdir(parents=True, exist_ok=True)
+    tempdir = TEST_TMP_ROOT / f"skill-audit-test-{uuid.uuid4().hex}"
+    tempdir.mkdir()
+    return tempdir
+
+
+def remove_tree(path: Path) -> None:
+    if not path.exists():
+        return
+
+    def retry_readable(function, value, _exc_info) -> None:
+        try:
+            os.chmod(value, 0o700)
+            function(value)
+        except FileNotFoundError:
+            return
+
+    try:
+        shutil.rmtree(path, onerror=retry_readable)
+    except (OSError, PermissionError):
+        return
+    try:
+        TEST_TMP_ROOT.rmdir()
+    except OSError:
+        pass
+
+
 class SkillUsefulnessAuditTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.tempdir = Path(tempfile.mkdtemp(prefix="skill-audit-test-"))
+        self.tempdir = make_test_tempdir()
 
     def tearDown(self) -> None:
-        shutil.rmtree(self.tempdir)
+        remove_tree(self.tempdir)
+
+    def test_remove_tree_tolerates_locked_sandbox_tempdirs(self) -> None:
+        locked = self.tempdir / "locked"
+        locked.mkdir()
+
+        with mock.patch.object(shutil, "rmtree", side_effect=PermissionError("locked temp file")):
+            remove_tree(locked)
 
     def run_audit(self, *args: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
@@ -1064,6 +1100,7 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
 
         item = self.first_result(payload, "install-hook-helper")
         self.assertEqual(item["risk_level"], "medium")
+        self.assertEqual(item["action"], "review-risk")
         self.assertIn("install-hook", item["risk_flags"])
         self.assertIn("Install-time hooks", item["risk_review"])
 
@@ -1762,6 +1799,26 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
         self.assertIn("tone-polisher", candidate_names)
         self.assertIn("overtrigger-helper", candidate_names)
         self.assertEqual(plan["accuracy_tradeoff"]["expected_accuracy_impact"], "low")
+
+    def test_ablation_plan_is_opt_in_for_default_outputs(self) -> None:
+        skills_root = self.tempdir / "skills"
+        write_skill(skills_root, "candidate-helper", "Rewrite prompts for clearer task execution.")
+        markdown_out = self.tempdir / "report.md"
+        json_out = self.tempdir / "report.json"
+
+        self.run_audit(
+            "--skills-root",
+            str(skills_root),
+            "--markdown-out",
+            str(markdown_out),
+            "--json-out",
+            str(json_out),
+        )
+        payload = json.loads(json_out.read_text(encoding="utf-8"))
+        report = markdown_out.read_text(encoding="utf-8")
+
+        self.assertNotIn("ablation_plan", payload)
+        self.assertNotIn("Cost-Efficient Ablation Plan", report)
 
     def test_ablation_plan_skips_clean_keep_general_skills(self) -> None:
         skills_root = self.tempdir / "skills"

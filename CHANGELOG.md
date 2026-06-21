@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.2
+
+- Keep medium-risk skills in risk review even when local evidence confidence is low
+- Make the cost-efficient ablation plan opt-in through `--ablation-plan-out` instead of adding it to default reports
+- Trim runtime skill instructions below the self-audit prompt-bloat threshold
+- Use sandbox-friendly test temp directories for local Windows validation
+
 ## 0.3.1
 
 - Avoid double-counting Python subprocess calls across regex and AST risk checks

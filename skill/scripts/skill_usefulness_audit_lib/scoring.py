@@ -376,11 +376,11 @@ def recommend_action(
             return "keep-narrow", "high overlap suggests narrower scope", False
         return "keep-narrow", "good final score", False
 
-    if confidence < 0.55:
-        return "observe-30d", "evidence confidence is low", False
-
     if risk_level == "medium":
         return "review-risk", "medium-risk patterns require review", False
+
+    if confidence < 0.55:
+        return "observe-30d", "evidence confidence is low", False
 
     if total >= 4.5:
         if overlap >= 0.65:

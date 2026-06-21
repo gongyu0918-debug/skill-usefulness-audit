@@ -2,7 +2,7 @@
 name: skill-usefulness-audit
 slug: skill-usefulness-audit
 description: Audit installed agent-skill packages for cleanup using usage, overlap, burden, risk, and optional ablation/community evidence. Trigger only on explicit requests to review installed agent skills; not for code review or human skills.
-version: 0.3.1
+version: 0.3.2
 tags: ["audit","skills","ablation","openclaw"]
 user-invocable: true
 disable-model-invocation: true
@@ -60,40 +60,13 @@ Examples: Excel, DOCX, PDF, browser automation, deployment, OCR, external API wr
 
 ## Workflow
 
-1. Collect installed skills.
-   Search user-provided roots first.
-   Fallback to OpenClaw-local roots such as `./skills`, `./.agents/skills`, `~/.openclaw/skills`, or `~/.agents/skills`.
-2. Collect usage evidence.
-   Prefer native counters, logs, or telemetry.
-   Read `calls`, `recent_30d_calls`, `recent_90d_calls`, `last_used_at`, and `active_days` when present.
-   Also read optional burden fields: `executions`, `script_failures`, `repair_turns`, `reference_loads`, and `false_triggers`.
-   Fallback to transcript mentions only when native counts are unavailable.
-3. Read every installed `SKILL.md`.
-   Extract `name`, `description`, headings, scripts, references, assets, resource size metrics, and source path.
-4. Classify each skill.
-   Use `api`, `tool`, or `general`.
-   Use the protected path for `api` and `tool`.
-5. Detect overlap.
-   Compare descriptions, headings, and resource names.
-   Keep the top overlap peer and similarity score for each skill.
-6. Generate a cost-efficient ablation plan for `general` skills.
-   Start with local triage signals instead of full replay.
-   Prioritize low final score, high overlap, high quality burden, frequent activation, weak evidence, and missing ablation.
-   Use `--ablation-plan-out` to write the candidate list, pairwise judge protocol, configurable early-stop rules, model-cost estimates, and accuracy tradeoff.
-   Run actual replay only for candidates selected by that plan.
-7. Score quality burden.
-   Penalize over-triggering with low execution or low ablation impact.
-   Penalize bloated `SKILL.md`, overlong frontmatter descriptions, excessive reference loading, hidden reference files, vague resource names, long references without a table of contents, reference/assets dumps, executable assets, script count bloat, script maintenance smells, script failure, script syntax errors, and repeated agent repair.
-8. Scan static risk and health signals.
-   Record shell, network, install-hook, packaging, protected-path, persistence, dynamic-exec, or private-content patterns as static hints, not as a safety proof.
-9. Load optional community metrics.
-   Accept local registry exports through `--community-file`.
-   Treat these metrics as external prior, not local proof.
-10. Score every skill on a 10-point local scale and subtract quality burden for `final_score`.
-   Read `references/scoring-rubric.md`.
-11. Produce the final report as tables.
-   Include a full ranking table, a recommended-actions table, a delete-candidate table, and a short evidence note for each skill.
-   Include `report_mode`, `score_breakdown`, `quality_penalty`, `quality_evidence`, and `community_breakdown` in JSON output.
+1. Collect installed skills from user-provided roots first, then host-local defaults.
+2. Load usage, history, ablation, and community evidence when provided.
+3. Read installed `SKILL.md` files plus script/reference/asset metrics.
+4. Classify skills as `api`, `tool`, or `general`; protect `api` and `tool` skills from fake no-tool ablation.
+5. Score usage, overlap, impact, quality burden, confidence, community prior, and static risk.
+6. Render Markdown/JSON reports with conservative human-review actions.
+7. Write a cost-efficient ablation plan only when `--ablation-plan-out` is provided.
 
 ## Ablation Rules
 
@@ -102,13 +75,7 @@ Read `references/ablation-protocol.md` before running ablation.
 This tool does not automatically replay historical conversations.
 It creates an ablation plan and reads normalized ablation result files provided by the user.
 
-For each eligible skill:
-
-- Generate the ablation plan first.
-- Sample historical tasks only for candidate skills in that plan.
-- Keep the prompt and artifacts identical between the skill-on and skill-off runs.
-- Judge pass/fail, quality delta, tool efficiency, and whether the final answer materially changed.
-- Mark high consistency between skill-on and skill-off runs as evidence that the skill contributes little.
+Generate an ablation plan with `--ablation-plan-out`, then replay only selected `general` skill candidates with identical prompts/artifacts and pairwise skill-on versus skill-off judging.
 
 Do not ablate `api` or `tool` skills through fake no-tool simulations.
 Use the protected-capability branch in the rubric for those skills.
@@ -148,28 +115,9 @@ Missing env means not configured in the current audit process, not proof that th
 
 ## Output Contract
 
-Always return these tables:
+Return a full score table, recommended actions, delete/merge candidates when present, missing evidence, quality burden, and risk review when relevant.
 
-1. Full score table with:
-   `rank`, `skill`, `source`, `kind`, `calls`, `recent_30d`, `usage`, `uniqueness`, `impact`, `community`, `confidence`, `risk`, `local`, `burden`, `final`, `verdict`, `action`, `basis`
-2. Recommended actions with:
-   `skill`, `local`, `burden`, `final`, `confidence`, `risk`, `action`, `advice`
-3. Deletion or merge candidates with:
-   `skill`, `local`, `burden`, `final`, `kind`, `action`, `trigger`, `advice`
-4. Missing-evidence table when usage, ablation, or optional community data is incomplete.
-5. Quality-burden table when a skill has context, asset, reference, script, or over-triggering burden.
-
-Always include these JSON fields:
-
-- `report_mode`: `strong-evidence`, `partial-evidence`, or `structure-only`.
-- `score_breakdown`: per-skill usage, uniqueness, impact, community, static risk, quality, and confidence details.
-- `quality_penalty`: `0.0-2.5` deduction from `local_score`.
-- `quality_penalty_uncapped`: raw quality burden before the `2.5` cap.
-- `quality_evidence`: concrete burden flags and evidence.
-- `community_breakdown`: registry signal components when community data is present.
-- `ablation_plan`: cost-efficient plan with candidate skills, model-cost estimates, stop rules, and expected accuracy impact.
-- `action_advice`: plain-language recommendation for the user.
-- `risk_review`: concise human review guidance for any static risk flags.
+JSON includes `report_mode`, per-skill `score_breakdown`, `quality_penalty`, `quality_penalty_uncapped`, `quality_evidence`, `community_breakdown`, `action_advice`, and `risk_review`. It includes `ablation_plan` only when `--ablation-plan-out` is used.
 
 Keep deletion advice conservative for system or host-core skills.
 Recommend narrowing or merging before deletion when two high-overlap skills still serve distinct host integrations.

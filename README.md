@@ -73,7 +73,7 @@ python codex-skill/scripts/skill_usefulness_audit.py audit \
 | `bloated-helper` | 5.2 | `review-burden` | high activation, little impact, heavy references/assets |
 | `shell-installer` | 6.4 | `quarantine-review` | useful, but high-risk execution pattern (`risk_score >= 4.0`) |
 
-The Markdown report is for humans. The JSON report is for automation and keeps the same evidence in machine-readable form.
+The Markdown report is for humans. The JSON report is for automation and keeps the same evidence in machine-readable form. The cost-efficient ablation plan is written only when `--ablation-plan-out` is provided.
 
 ## How To Read The Report
 
@@ -91,7 +91,7 @@ The Markdown report is for humans. The JSON report is for automation and keeps t
 
 Use `action` / `action_advice` as the final human-facing recommendation. `verdict` is only a `final_score` band, so risk, quality burden, confidence, or community signals can deliberately make `action` stricter than `verdict`. The `basis` column is a compact explanation for humans, while JSON `score_breakdown` is the complete machine-readable evidence.
 
-Actions are conservative recommendations, not automatic operations. Low-confidence skills usually go to `observe-30d`. High-risk skills (`risk_score >= 4.0`) go to `quarantine-review` even when they score well locally, and `delete` / `merge-delete` always require manual review before removal.
+Actions are conservative recommendations, not automatic operations. Low-confidence skills usually go to `observe-30d`, unless static risk needs review. High-risk skills (`risk_score >= 4.0`) go to `quarantine-review` even when they score well locally, medium-risk skills go to risk review when they are not already in a keep-with-risk branch, and `delete` / `merge-delete` always require manual review before removal.
 
 ## Inputs
 
@@ -171,5 +171,5 @@ python codex-skill/scripts/skill_usefulness_audit.py audit \
 
 ```bash
 python scripts/sync_bundle.py
-clawhub publish ./skill --slug skill-usefulness-audit --name "skill-usefulness-audit" --version 0.3.1 --tags latest,audit,skills,openclaw --changelog "Fix risk scoring, credential risk escalation, broken-script health caps, and low-evidence verdicts"
+clawhub publish ./skill --slug skill-usefulness-audit --name "skill-usefulness-audit" --version 0.3.2 --tags latest,audit,skills,openclaw --changelog "Make ablation planning opt-in, preserve medium-risk review, and trim runtime context"
 ```
