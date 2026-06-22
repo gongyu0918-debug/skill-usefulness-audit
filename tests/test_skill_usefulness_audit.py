@@ -1330,6 +1330,7 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
         report = zh_markdown.read_text(encoding="utf-8")
         self.assertIn("# 技能有用性审计", report)
         self.assertIn("## 决策摘要", report)
+        self.assertIn("先看结论；后面的表格用于人工复核和 agent 二次分析。", report)
         self.assertIn("- 建议保留: 1", report)
         self.assertIn("- 继续观察并补证据: 1", report)
         self.assertIn("### 需要人工复核后再信任", report)
