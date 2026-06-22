@@ -110,12 +110,14 @@ def run_audit(args: argparse.Namespace) -> int:
         community_prior, community_conf, community_breakdown = community_prior_score(community_entry)
         evidence_note = " | ".join(dict.fromkeys(evidence_notes)) if evidence_notes else None
         risk_review = risk_review_summary(str(skill["risk_level"]), list(skill["risk_evidence"]))  # type: ignore[arg-type]
+        install_gate = install_gate_summary(str(skill["risk_level"]), list(skill["risk_evidence"]))  # type: ignore[arg-type]
 
         u_score = usage_score(usage_record, evidence_weight)
         uniq_score = uniqueness_score(best_overlap)
         i_score = impact_score(kind, calls, best_overlap, skill, ablation_summary)
         total = round(u_score + uniq_score + i_score, 2)
-        quality = quality_penalty(skill, usage_record, ablation_summary)
+        catalog_evidence = catalog_quality_evidence(best_peer, best_overlap)
+        quality = quality_penalty(skill, usage_record, ablation_summary, catalog_evidence)
         quality_penalty_value = float(quality["penalty"])
         quality_penalty_uncapped = float(quality["penalty_uncapped"])
         quality_flags = list(quality["flags"])  # type: ignore[arg-type]
@@ -182,6 +184,7 @@ def run_audit(args: argparse.Namespace) -> int:
                 "flags": skill["risk_flags"],
                 "static_level": skill["static_risk_level"],
                 "static_flags": skill["static_risk_flags"],
+                "install_gate": install_gate,
             },
             "quality": {
                 "penalty": quality_penalty_value,
@@ -261,6 +264,7 @@ def run_audit(args: argparse.Namespace) -> int:
                 "risk_flags": skill["risk_flags"],
                 "risk_evidence": skill["risk_evidence"],
                 "risk_review": risk_review,
+                "install_gate": install_gate,
                 "static_risk_level": skill["static_risk_level"],
                 "static_risk_score": skill["static_risk_score"],
                 "static_risk_flags": skill["static_risk_flags"],
@@ -462,6 +466,7 @@ def run_audit(args: argparse.Namespace) -> int:
                 str(item["display_name"]),
                 str(item["risk_level"]),
                 short_risk_flags(list(item["risk_flags"])),
+                str(item["install_gate"]["verdict"]),  # type: ignore[index]
                 str(item["risk_review"]),
             ]
         )
@@ -472,7 +477,7 @@ def run_audit(args: argparse.Namespace) -> int:
                 "",
                 "## Risk Review",
                 "",
-                markdown_table(["Skill", "Risk", "Flags", "Review"], risk_rows),
+                markdown_table(["Skill", "Risk", "Flags", "Install Gate", "Review"], risk_rows),
             ]
         )
 

@@ -270,10 +270,13 @@ def quality_penalty(
     skill: dict[str, object],
     usage_record: dict[str, object],
     ablation: dict[str, float] | None,
+    additional_evidence: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
     evidence = list(skill.get("static_quality_evidence", []))
     evidence.extend(readiness_quality_evidence(skill))
     evidence.extend(runtime_quality_evidence(usage_record, ablation))
+    if additional_evidence:
+        evidence.extend(additional_evidence)
     penalty_uncapped = round(sum(float(item["penalty"]) for item in evidence), 2)
     penalty = round(clamp(penalty_uncapped, 0.0, 2.5), 2)
     return {
@@ -282,6 +285,19 @@ def quality_penalty(
         "flags": [str(item["label"]) for item in evidence],
         "evidence": evidence,
     }
+
+
+def catalog_quality_evidence(overlap_peer: str | None, overlap_value: float) -> list[dict[str, object]]:
+    if not overlap_peer or overlap_value < 0.85:
+        return []
+    return [
+        quality_issue(
+            "near-duplicate-instructions",
+            0.10,
+            "instruction fingerprint closely matches another installed skill",
+            metrics={"peer": overlap_peer, "overlap": round(overlap_value, 2)},
+        )
+    ]
 
 
 def health_cap_from_quality(evidence: list[dict[str, object]]) -> float | None:

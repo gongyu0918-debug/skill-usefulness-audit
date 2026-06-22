@@ -63,6 +63,34 @@ def risk_review_summary(level: str, evidence: list[dict[str, object]]) -> str:
     return f"{prefix} " + " ".join(dict.fromkeys(guidance))
 
 
+def install_gate_summary(level: str, evidence: list[dict[str, object]]) -> dict[str, str]:
+    flags = [str(item.get("label", "")) for item in evidence if item.get("label")]
+    if level == "high":
+        return {
+            "verdict": "block-before-install",
+            "reason": "High-risk static signals should block a new install until human review clears them.",
+        }
+    if level == "medium":
+        return {
+            "verdict": "review-before-install",
+            "reason": "Medium-risk static signals need human review before a new install is trusted.",
+        }
+    if level == "low":
+        return {
+            "verdict": "warn-before-install",
+            "reason": "Low-risk static signals should be checked before a new install is trusted.",
+        }
+    if flags:
+        return {
+            "verdict": "review-before-install",
+            "reason": "Static signals were present but unclassified; review before a new install is trusted.",
+        }
+    return {
+        "verdict": "no-static-risk-gate",
+        "reason": "No static risk gate was triggered; still review the source before installing.",
+    }
+
+
 def build_basis(
     usage_record: dict[str, object],
     usage_source: str,

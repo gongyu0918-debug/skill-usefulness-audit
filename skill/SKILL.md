@@ -43,6 +43,12 @@ Treat all `delete`, `merge-delete`, and `quarantine-review` results as manual-re
 Do not delete skills based only on a structure-only report.
 This tool does not automatically replay historical conversations; it generates ablation plans and reads ablation result files that the user provides.
 
+## Borrowed Idea Gate
+
+When borrowing ideas from another skill, change one idea at a time.
+Record the source idea, expected benefit, baseline command, ablation command, and rollback condition.
+Keep the change only when the same input fixture improves or clarifies the target behavior without making unrelated skills stricter.
+
 ## Audit Scope
 
 Audit these layers in order:

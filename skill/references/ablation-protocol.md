@@ -9,6 +9,7 @@ Use this protocol for `general` skills selected by the ablation plan.
 - Sampling
 - Replay Method
 - Judge Method
+- Borrowed Idea Validation
 - Case Judgment
 - Judgment Rule
 - Early Stop Rules
@@ -76,6 +77,14 @@ Keep these constant:
 
 Use a fresh thread or isolated run if the host supports it.
 Subagents are optional. They improve isolation and parallelism, but they increase total model spend when every branch runs full replay.
+
+## Borrowed Idea Validation
+
+Borrowed idea validation uses the same replay discipline as normal ablation.
+For a borrowed idea, compare the current baseline and changed version with the same input fixture.
+Use identical installed-skill fixtures, usage files, ablation files, and output fields.
+Keep the idea only when the target behavior improves or becomes clearer and unrelated skills do not receive stricter actions.
+Rollback if a non-target skill moves to `delete`, `merge-delete`, or `quarantine-review` without new risk evidence.
 
 ## Judge Method
 

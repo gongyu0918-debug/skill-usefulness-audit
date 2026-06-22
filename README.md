@@ -32,6 +32,12 @@ This mode is `structure-only`. Use it to find broken scripts, bloated references
 Do not delete skills based only on a structure-only report.
 For cleanup decisions, rerun with real `--usage-file`; for general skills near the delete/merge boundary, generate an ablation plan and add `--ablation-file` results.
 
+## Borrowed Idea Gate
+
+When absorbing ideas from another skill, keep the change small and measurable.
+Record the source idea, expected benefit, baseline command, ablation command, and rollback condition before merging.
+Use the same input fixture against the current baseline and the changed version; revert the change if unrelated skills receive stricter actions or existing risk/quality behavior regresses.
+
 ## Quick Start
 
 Audit your local Codex skills:
