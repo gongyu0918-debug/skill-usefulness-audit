@@ -2,7 +2,7 @@
 name: skill-usefulness-audit
 slug: skill-usefulness-audit
 description: Audit installed agent-skill packages for cleanup using usage, overlap, burden, risk, and optional ablation/community evidence. Trigger only on explicit requests to review installed agent skills; not for code review or human skills.
-version: 0.3.2
+version: 0.3.3
 tags: ["audit","skills","ablation","openclaw"]
 user-invocable: true
 disable-model-invocation: true

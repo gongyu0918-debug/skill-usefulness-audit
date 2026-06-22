@@ -180,5 +180,5 @@ python codex-skill/scripts/skill_usefulness_audit.py audit \
 
 ```bash
 python scripts/sync_bundle.py
-clawhub publish ./skill --slug skill-usefulness-audit --name "skill-usefulness-audit" --version 0.3.2 --tags latest,audit,skills,openclaw --changelog "Make ablation planning opt-in, preserve medium-risk review, and trim runtime context"
+clawhub publish ./skill --slug skill-usefulness-audit --name "skill-usefulness-audit" --version 0.3.3 --tags latest,audit,skills,openclaw --changelog "Add decision summary, localized Markdown reports, and opt-in raw JSON workflow"
 ```

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.3
+
+- Add a front-of-report Decision Summary so humans see keep, observe, review, removal, and install-gate buckets before evidence tables
+- Add `--report-language` for English and Simplified Chinese Markdown reports while keeping JSON, action codes, and risk flags stable
+- Make raw JSON output opt-in in the docs and skill workflow; default user-facing output is Markdown plus conversational follow-up
+- Add a short report narration prompt so agents can summarize audit results without pasting raw JSON or full tables by default
+- Keep default English Markdown and JSON outputs backward-compatible under the same inputs
+
 ## 0.3.2
 
 - Keep medium-risk skills in risk review even when local evidence confidence is low
