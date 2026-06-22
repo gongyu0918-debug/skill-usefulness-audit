@@ -97,6 +97,7 @@ python scripts/skill_usefulness_audit.py audit \
   --history-file ./history.jsonl \
   --ablation-file ./ablation.json \
   --community-file ./community.json \
+  --report-language auto \
   --markdown-out ./skill-audit-report.md \
   --json-out ./skill-audit-report.json \
   --ablation-plan-out ./skill-ablation-plan.json
@@ -110,6 +111,7 @@ Input contracts:
 - `--history-file`: raw transcript export used only when direct usage counts are weak or missing. Mentions become `history_mentions` / `suspected_invocations`, not direct `calls`.
 - `--ablation-file`: normalized JSON or JSONL with skill-on versus skill-off case results.
 - `--community-file`: optional offline JSON, JSONL, CSV, or TSV registry metrics.
+- `--report-language`: Markdown display language. Pass `zh-CN` when the user invoked the skill in Chinese, `en` for English, and `auto` or omit it when the language is unclear. Unsupported values fall back to English.
 - `--ablation-plan-out`: optional JSON plan that estimates model cost and narrows ablation to high-value candidates.
 - `--ablation-baseline-cases`, `--ablation-initial-cases`, `--ablation-expand-cases`, `--ablation-max-cases`: optional case-count overrides for the ablation plan.
 
@@ -122,6 +124,8 @@ Missing env means not configured in the current audit process, not proof that th
 ## Output Contract
 
 Return a front-of-report Decision Summary first, then the full score table, recommended actions, delete/merge candidates when present, missing evidence, quality burden, and risk review when relevant.
+
+For Markdown reports, match the user's invocation language when it is supported. Keep skill names, file paths, CLI flags, env vars, action codes, risk flags, and JSON field names in English. If the user language is unsupported or unclear, use English.
 
 JSON includes `report_mode`, per-skill `score_breakdown`, `quality_penalty`, `quality_penalty_uncapped`, `quality_evidence`, `community_breakdown`, `action_advice`, and `risk_review`. It includes `ablation_plan` only when `--ablation-plan-out` is used.
 

@@ -81,6 +81,8 @@ python codex-skill/scripts/skill_usefulness_audit.py audit \
 
 The Markdown report is for humans. It starts with a Decision Summary that groups skills into keep, observe, human-review, merge/remove, and new-install-gate buckets before the evidence tables. The JSON report is for automation and keeps the same evidence in machine-readable form. The cost-efficient ablation plan is written only when `--ablation-plan-out` is provided.
 
+Use `--report-language zh-CN` when the user invokes the audit in Chinese. Use `--report-language en` for English. `auto` and unsupported values fall back to English so unclear prompts do not produce low-quality localization. This option only changes Markdown wording; JSON field names, action codes, risk flags, and scores remain stable.
+
 ## How To Read The Report
 
 - `local_score`: the 10-point usefulness score from usage, uniqueness, and impact.
@@ -110,6 +112,7 @@ The tool works with no extra files, but direct evidence gives better results.
 | `--history-file` | text, JSON, JSONL | transcript text used as weak fallback evidence; mentions are reported separately from direct `calls` |
 | `--ablation-file` | JSON, JSONL | skill-on versus skill-off cases |
 | `--community-file` | JSON, JSONL, CSV, TSV | `rating`, `downloads`, `installs_current`, `installs_all_time`, `trending_7d`, `stars`, `comments_count`, `last_updated` |
+| `--report-language` | `auto`, `en`, `zh-CN` | Markdown display language; unsupported or unclear values fall back to English |
 | `--ablation-plan-out` | JSON | cost-efficient ablation plan with candidate skills, early-stop rules, and model-cost estimates |
 
 Minimal `usage.json`:

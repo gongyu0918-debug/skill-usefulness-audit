@@ -302,6 +302,7 @@ def run_audit(args: argparse.Namespace) -> int:
     )
     missing = [item for item in ranked if item["missing_usage"] or item["missing_ablation"] or item["missing_community"]]
     report_mode = determine_report_mode(usage_paths, history_paths, ablation_paths, ranked)
+    report_language = normalize_report_language(getattr(args, "report_language", "auto"))
     ablation_plan = None
     if args.ablation_plan_out:
         ablation_plan = build_ablation_plan(
@@ -339,42 +340,23 @@ def run_audit(args: argparse.Namespace) -> int:
         )
 
     report_parts = [
-        "# Skill Usefulness Audit",
+        f"# {report_text(report_language, 'title')}",
         "",
-        f"- Skills audited: {len(ranked)}",
-        f"- Usage files: {len(usage_paths)}",
-        f"- History files: {len(history_paths)}",
-        f"- Ablation files: {len(ablation_paths)}",
-        f"- Community files: {len(community_paths)}",
-        f"- Report mode: {report_mode}",
-        f"- Recommended actions: {len(recommended_actions)}",
-        f"- Delete candidates: {len(delete_candidates)}",
+        f"- {report_text(report_language, 'skills_audited')}: {len(ranked)}",
+        f"- {report_text(report_language, 'usage_files')}: {len(usage_paths)}",
+        f"- {report_text(report_language, 'history_files')}: {len(history_paths)}",
+        f"- {report_text(report_language, 'ablation_files')}: {len(ablation_paths)}",
+        f"- {report_text(report_language, 'community_files')}: {len(community_paths)}",
+        f"- {report_text(report_language, 'report_mode')}: {report_mode}",
+        f"- {report_text(report_language, 'recommended_actions')}: {len(recommended_actions)}",
+        f"- {report_text(report_language, 'delete_candidates')}: {len(delete_candidates)}",
         "",
-        *decision_summary(ranked),
+        *decision_summary(ranked, language=report_language),
         "",
-        "## Score Table",
+        f"## {report_text(report_language, 'score_table')}",
         "",
         markdown_table(
-            [
-                "Rank",
-                "Skill",
-                "Source",
-                "Kind",
-                "Calls",
-                "Recent30",
-                "Usage",
-                "Unique",
-                "Impact",
-                "Comm",
-                "Conf",
-                "Risk",
-                "Local",
-                "Burden",
-                "Final",
-                "Verdict",
-                "Action",
-                "Basis",
-            ],
+            report_headers(report_language, "score"),
             score_rows,
         ),
     ]
@@ -386,17 +368,17 @@ def run_audit(args: argparse.Namespace) -> int:
         report_parts.extend(
             [
                 "",
-                "## Cost-Efficient Ablation Plan",
+                f"## {report_text(report_language, 'cost_ablation_plan')}",
                 "",
-                f"- Strategy: {ablation_plan['strategy']}",
-                f"- Eligible general skills: {ablation_plan['eligible_general_skills']}",
-                f"- Candidate skills: {ablation_plan['candidate_skills']}",
-                f"- Deferred general skills: {ablation_plan['deferred_general_skills']}",
-                f"- Expected model-cost reduction vs {baseline_policy}-case full protocol: {realistic_reduction}%",
-                f"- Expected accuracy impact: {ablation_plan['accuracy_tradeoff']['expected_accuracy_impact']}",
+                f"- {report_text(report_language, 'strategy')}: {ablation_plan['strategy']}",
+                f"- {report_text(report_language, 'eligible_general_skills')}: {ablation_plan['eligible_general_skills']}",
+                f"- {report_text(report_language, 'candidate_skills')}: {ablation_plan['candidate_skills']}",
+                f"- {report_text(report_language, 'deferred_general_skills')}: {ablation_plan['deferred_general_skills']}",
+                f"- {report_text(report_language, 'expected_model_cost_reduction').format(baseline_policy=baseline_policy)}: {realistic_reduction}%",
+                f"- {report_text(report_language, 'expected_accuracy_impact')}: {ablation_plan['accuracy_tradeoff']['expected_accuracy_impact']}",
                 "",
                 markdown_table(
-                    ["Skill", "Priority", "Initial", "Expand", "Max", "Reasons"],
+                    report_headers(report_language, "ablation"),
                     [
                         [
                             str(item["skill"]),
@@ -429,9 +411,9 @@ def run_audit(args: argparse.Namespace) -> int:
         report_parts.extend(
             [
                 "",
-                "## Community Signal Breakdown",
+                f"## {report_text(report_language, 'community_signal_breakdown')}",
                 "",
-                markdown_table(["Skill", "Comm", "Confidence", "Components"], community_rows),
+                markdown_table(report_headers(report_language, "community"), community_rows),
             ]
         )
 
@@ -453,9 +435,9 @@ def run_audit(args: argparse.Namespace) -> int:
         report_parts.extend(
             [
                 "",
-                "## Quality Burden",
+                f"## {report_text(report_language, 'quality_burden')}",
                 "",
-                markdown_table(["Skill", "Burden", "Uncapped", "Flags", "Evidence"], quality_rows),
+                markdown_table(report_headers(report_language, "quality"), quality_rows),
             ]
         )
 
@@ -469,7 +451,11 @@ def run_audit(args: argparse.Namespace) -> int:
                 str(item["risk_level"]),
                 short_risk_flags(list(item["risk_flags"])),
                 str(item["install_gate"]["verdict"]),  # type: ignore[index]
-                str(item["risk_review"]),
+                risk_review_summary_for_report(
+                    str(item["risk_level"]),
+                    list(item["risk_evidence"]),  # type: ignore[arg-type]
+                    report_language,
+                ),
             ]
         )
 
@@ -477,9 +463,9 @@ def run_audit(args: argparse.Namespace) -> int:
         report_parts.extend(
             [
                 "",
-                "## Risk Review",
+                f"## {report_text(report_language, 'risk_review')}",
                 "",
-                markdown_table(["Skill", "Risk", "Flags", "Install Gate", "Review"], risk_rows),
+                markdown_table(report_headers(report_language, "risk"), risk_rows),
             ]
         )
 
@@ -493,16 +479,16 @@ def run_audit(args: argparse.Namespace) -> int:
                 fmt_optional_float(item["confidence_score"]),
                 str(item["risk_level"]),
                 str(item["action"]),
-                str(item["action_advice"]),
+                action_advice_for_report(str(item["action"]), str(item["action_reason"]), report_language),
             ]
             for item in recommended_actions
         ]
         report_parts.extend(
             [
                 "",
-                "## Recommended Actions",
+                f"## {report_text(report_language, 'recommended_actions_heading')}",
                 "",
-                markdown_table(["Skill", "Local", "Burden", "Final", "Confidence", "Risk", "Action", "Advice"], action_rows),
+                markdown_table(report_headers(report_language, "actions"), action_rows),
             ]
         )
 
@@ -516,16 +502,16 @@ def run_audit(args: argparse.Namespace) -> int:
                 str(item["kind"]),
                 str(item["action"]),
                 str(item["delete_trigger"]),
-                str(item["action_advice"]),
+                action_advice_for_report(str(item["action"]), str(item["action_reason"]), report_language),
             ]
             for item in delete_candidates
         ]
         report_parts.extend(
             [
                 "",
-                "## Delete Candidates",
+                f"## {report_text(report_language, 'delete_candidates_heading')}",
                 "",
-                markdown_table(["Skill", "Local", "Burden", "Final", "Kind", "Action", "Trigger", "Advice"], delete_rows),
+                markdown_table(report_headers(report_language, "delete"), delete_rows),
             ]
         )
 
@@ -534,18 +520,18 @@ def run_audit(args: argparse.Namespace) -> int:
         for item in missing:
             gaps = []
             if item["missing_usage"]:
-                gaps.append("usage")
+                gaps.append(missing_evidence_label("usage", report_language))
             if item["missing_ablation"]:
-                gaps.append("ablation")
+                gaps.append(missing_evidence_label("ablation", report_language))
             if item["missing_community"]:
-                gaps.append("community")
+                gaps.append(missing_evidence_label("community", report_language))
             missing_rows.append([str(item["display_name"]), str(item["kind"]), ", ".join(gaps)])
         report_parts.extend(
             [
                 "",
-                "## Missing Evidence",
+                f"## {report_text(report_language, 'missing_evidence')}",
                 "",
-                markdown_table(["Skill", "Kind", "Missing"], missing_rows),
+                markdown_table(report_headers(report_language, "missing"), missing_rows),
             ]
         )
 
@@ -603,6 +589,11 @@ def build_parser() -> argparse.ArgumentParser:
     audit_parser.add_argument("--ablation-file", action="append", help="JSON or JSONL file with ablation cases.")
     audit_parser.add_argument("--community-file", action="append", help="Offline JSON/JSONL/CSV/TSV file with registry metrics.")
     audit_parser.add_argument("--markdown-out", help="Write the Markdown report to this file.")
+    audit_parser.add_argument(
+        "--report-language",
+        default="auto",
+        help="Markdown report language: auto, en, or zh-CN. Unsupported or unclear values fall back to English.",
+    )
     audit_parser.add_argument("--json-out", help="Write machine-readable JSON output to this file.")
     audit_parser.add_argument("--ablation-plan-out", help="Write a cost-efficient ablation plan JSON file.")
     audit_parser.add_argument(

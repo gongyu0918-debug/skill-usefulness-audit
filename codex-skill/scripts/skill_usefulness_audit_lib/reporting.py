@@ -16,6 +16,19 @@ RISK_REVIEW_GUIDANCE = {
     "script-exec-call": "The script invokes a child process; inspect the called command and arguments.",
 }
 
+RISK_REVIEW_GUIDANCE_ZH_CN = {
+    "base64-payload": "存在可解码载荷，使用前先看解码后的真实内容。",
+    "curl-pipe-shell": "下载内容会被直接执行，先确认来源可信且最好固定到本地脚本。",
+    "dynamic-exec": "动态执行会降低可审计性，确认它是否真的必要。",
+    "external-post": "技能可能向外部发送数据，确认目的地和发送的数据类型。",
+    "install-hook": "安装阶段钩子可能在用户调用前执行，先检查钩子内容。",
+    "network-download": "技能会下载远程内容，确认来源可信且版本固定。",
+    "packaging-exec-surface": "打包配置可能触发本地构建代码，安装前先检查。",
+    "protected-path-access": "技能引用了受保护的本地路径，确认这种访问是否必要。",
+    "private-content-artifact": "包内疑似包含凭证类内容，信任前应删除或轮换。",
+    "script-exec-call": "脚本会调用子进程，检查具体命令和参数。",
+}
+
 ACTION_ADVICE = {
     "delete": "Remove it after a quick human check; the evidence says it is not earning its place.",
     "merge-delete": "Merge any useful parts into the stronger overlapping skill, then remove this one after review.",
@@ -32,6 +45,24 @@ ACTION_ADVICE = {
     "keep-narrow": "Keep it, but narrow the trigger or scope if it overlaps with another skill.",
     "keep": "Keep it; the evidence is strong enough.",
     "keep-system": "Keep it as a system skill.",
+}
+
+ACTION_ADVICE_ZH_CN = {
+    "delete": "人工快速确认后移除；现有证据显示它没有赚回维护成本。",
+    "merge-delete": "先把有用部分合并到更强的重叠技能，再人工确认后移除这个技能。",
+    "merge-or-review": "先和重叠技能对比，再决定合并还是保留。",
+    "observe-30d": "暂时保留，先收集更好的使用证据，不要现在删除。",
+    "quarantine-review": "暂时不要信任；先检查高风险文件再决定是否使用或保留。",
+    "review-risk": "先复核风险行为，再决定是否继续安装。",
+    "review-system": "这是系统技能且有较高风险信号，需要谨慎复核。",
+    "keep-review-risk": "看起来有用，但保留前需要检查风险信号。",
+    "keep-review-burden": "看起来有用，但上下文或维护负担偏高，应该简化。",
+    "review-burden": "先复核并简化，再判断是否值得保留。",
+    "review-vs-community": "先检查社区证据并跑基准，再考虑替换或移除。",
+    "review": "补充更好的证据后再决定保留还是删除。",
+    "keep-narrow": "建议保留，但如果和其他技能重叠，应收窄触发或范围。",
+    "keep": "建议保留；证据已经足够强。",
+    "keep-system": "作为系统技能保留。",
 }
 
 KEEP_ACTIONS = {"keep", "keep-narrow", "keep-system"}
@@ -53,6 +84,214 @@ SUMMARY_INSTALL_GATE_VERDICTS = {
     "warn-before-install",
 }
 
+REPORT_TEXT = {
+    "en": {
+        "title": "Skill Usefulness Audit",
+        "skills_audited": "Skills audited",
+        "usage_files": "Usage files",
+        "history_files": "History files",
+        "ablation_files": "Ablation files",
+        "community_files": "Community files",
+        "report_mode": "Report mode",
+        "recommended_actions": "Recommended actions",
+        "delete_candidates": "Delete candidates",
+        "decision_summary": "Decision Summary",
+        "decision_intro": "This is the reviewer-facing summary. Use the sections below to decide what is useful, what needs evidence, and what needs risk or removal review; the tables after this section are supporting evidence.",
+        "useful_count": "Useful enough to keep",
+        "observe_count": "Watch for more evidence",
+        "review_count": "Needs human review before trusting",
+        "removal_count": "Merge or remove candidates",
+        "install_gate_count": "New-install gates",
+        "useful_group": "Useful enough to keep",
+        "observe_group": "Watch for more evidence",
+        "review_group": "Needs human review before trusting",
+        "removal_group": "Merge or remove candidates",
+        "install_gate_group": "New-install gates",
+        "none": "None.",
+        "more": "+{count} more in the evidence tables.",
+        "score_word": "score",
+        "call": "call",
+        "calls": "calls",
+        "recent_call": "recent call",
+        "recent_calls": "recent calls",
+        "no_usage": "no matched usage data",
+        "missing_ablation": "missing ablation",
+        "risk": "risk",
+        "quality": "quality",
+        "missing_env": "missing env",
+        "install_gate": "install gate",
+        "score_table": "Score Table",
+        "cost_ablation_plan": "Cost-Efficient Ablation Plan",
+        "strategy": "Strategy",
+        "eligible_general_skills": "Eligible general skills",
+        "candidate_skills": "Candidate skills",
+        "deferred_general_skills": "Deferred general skills",
+        "expected_model_cost_reduction": "Expected model-cost reduction vs {baseline_policy}-case full protocol",
+        "expected_accuracy_impact": "Expected accuracy impact",
+        "community_signal_breakdown": "Community Signal Breakdown",
+        "quality_burden": "Quality Burden",
+        "risk_review": "Risk Review",
+        "recommended_actions_heading": "Recommended Actions",
+        "delete_candidates_heading": "Delete Candidates",
+        "missing_evidence": "Missing Evidence",
+    },
+    "zh-CN": {
+        "title": "技能有用性审计",
+        "skills_audited": "已审计技能",
+        "usage_files": "使用数据文件",
+        "history_files": "历史记录文件",
+        "ablation_files": "消融数据文件",
+        "community_files": "社区数据文件",
+        "report_mode": "报告模式",
+        "recommended_actions": "需处理建议数",
+        "delete_candidates": "删除候选数",
+        "decision_summary": "决策摘要",
+        "decision_intro": "这是给人工审阅者看的摘要。先用下面的分组判断哪些技能有用、哪些缺证据、哪些需要风险或移除复核；后面的表格是支撑证据。",
+        "useful_count": "建议保留",
+        "observe_count": "继续观察并补证据",
+        "review_count": "需要人工复核后再信任",
+        "removal_count": "合并或移除候选",
+        "install_gate_count": "新安装门禁",
+        "useful_group": "建议保留",
+        "observe_group": "继续观察并补证据",
+        "review_group": "需要人工复核后再信任",
+        "removal_group": "合并或移除候选",
+        "install_gate_group": "新安装门禁",
+        "none": "无。",
+        "more": "其余 {count} 个见后面的证据表。",
+        "score_word": "分数",
+        "call": "次调用",
+        "calls": "次调用",
+        "recent_call": "次调用",
+        "recent_calls": "次调用",
+        "no_usage": "没有匹配的使用数据",
+        "missing_ablation": "缺少消融证据",
+        "risk": "风险",
+        "quality": "质量信号",
+        "missing_env": "缺少环境变量",
+        "install_gate": "安装门禁",
+        "score_table": "评分表",
+        "cost_ablation_plan": "低成本消融计划",
+        "strategy": "策略",
+        "eligible_general_skills": "符合条件的通用技能",
+        "candidate_skills": "候选技能",
+        "deferred_general_skills": "暂缓的通用技能",
+        "expected_model_cost_reduction": "相对 {baseline_policy} 例完整协议的预计模型成本降低",
+        "expected_accuracy_impact": "预计准确性影响",
+        "community_signal_breakdown": "社区信号拆解",
+        "quality_burden": "质量负担",
+        "risk_review": "风险复核",
+        "recommended_actions_heading": "处理建议",
+        "delete_candidates_heading": "删除候选",
+        "missing_evidence": "缺失证据",
+    },
+}
+
+REPORT_TABLE_HEADERS = {
+    "score": {
+        "en": [
+            "Rank",
+            "Skill",
+            "Source",
+            "Kind",
+            "Calls",
+            "Recent30",
+            "Usage",
+            "Unique",
+            "Impact",
+            "Comm",
+            "Conf",
+            "Risk",
+            "Local",
+            "Burden",
+            "Final",
+            "Verdict",
+            "Action",
+            "Basis",
+        ],
+        "zh-CN": [
+            "排名",
+            "技能",
+            "来源",
+            "类型",
+            "调用",
+            "近30天",
+            "使用",
+            "独特性",
+            "影响",
+            "社区",
+            "置信度",
+            "风险",
+            "本地分",
+            "负担",
+            "最终分",
+            "结论",
+            "建议",
+            "依据",
+        ],
+    },
+    "ablation": {
+        "en": ["Skill", "Priority", "Initial", "Expand", "Max", "Reasons"],
+        "zh-CN": ["技能", "优先级", "初始例数", "扩展例数", "最大例数", "原因"],
+    },
+    "community": {
+        "en": ["Skill", "Comm", "Confidence", "Components"],
+        "zh-CN": ["技能", "社区分", "置信度", "组成"],
+    },
+    "quality": {
+        "en": ["Skill", "Burden", "Uncapped", "Flags", "Evidence"],
+        "zh-CN": ["技能", "负担", "未封顶", "标记", "证据"],
+    },
+    "risk": {
+        "en": ["Skill", "Risk", "Flags", "Install Gate", "Review"],
+        "zh-CN": ["技能", "风险", "标记", "安装门禁", "复核意见"],
+    },
+    "actions": {
+        "en": ["Skill", "Local", "Burden", "Final", "Confidence", "Risk", "Action", "Advice"],
+        "zh-CN": ["技能", "本地分", "负担", "最终分", "置信度", "风险", "建议", "说明"],
+    },
+    "delete": {
+        "en": ["Skill", "Local", "Burden", "Final", "Kind", "Action", "Trigger", "Advice"],
+        "zh-CN": ["技能", "本地分", "负担", "最终分", "类型", "建议", "触发原因", "说明"],
+    },
+    "missing": {
+        "en": ["Skill", "Kind", "Missing"],
+        "zh-CN": ["技能", "类型", "缺失证据"],
+    },
+}
+
+MISSING_EVIDENCE_LABELS = {
+    "en": {"usage": "usage", "ablation": "ablation", "community": "community"},
+    "zh-CN": {"usage": "使用数据", "ablation": "消融数据", "community": "社区数据"},
+}
+
+
+def normalize_report_language(value: object) -> str:
+    raw = str(value or "auto").strip()
+    if not raw:
+        return "en"
+    normalized = raw.lower().replace("_", "-")
+    if normalized in {"zh", "zh-cn", "zh-hans", "cn", "chinese", "中文", "简体中文"}:
+        return "zh-CN"
+    if normalized in {"en", "en-us", "en-gb", "english"}:
+        return "en"
+    return "en"
+
+
+def report_text(language: str, key: str) -> str:
+    normalized = normalize_report_language(language)
+    return REPORT_TEXT.get(normalized, REPORT_TEXT["en"]).get(key, REPORT_TEXT["en"][key])
+
+
+def report_headers(language: str, table: str) -> list[str]:
+    normalized = normalize_report_language(language)
+    return REPORT_TABLE_HEADERS[table].get(normalized, REPORT_TABLE_HEADERS[table]["en"])
+
+
+def missing_evidence_label(value: str, language: str) -> str:
+    normalized = normalize_report_language(language)
+    return MISSING_EVIDENCE_LABELS.get(normalized, MISSING_EVIDENCE_LABELS["en"]).get(value, value)
+
 
 def action_advice(action: str, reason: str) -> str:
     if action in ACTION_ADVICE:
@@ -61,6 +300,17 @@ def action_advice(action: str, reason: str) -> str:
     if normalized_reason:
         return f"Review it before changing anything: {normalized_reason}."
     return "Review it before changing anything."
+
+
+def action_advice_for_report(action: str, reason: str, language: str = "en") -> str:
+    if normalize_report_language(language) != "zh-CN":
+        return action_advice(action, reason)
+    if action in ACTION_ADVICE_ZH_CN:
+        return ACTION_ADVICE_ZH_CN[action]
+    normalized_reason = reason.strip().rstrip(".")
+    if normalized_reason:
+        return f"修改前先人工复核：{normalized_reason}。"
+    return "修改前先人工复核。"
 
 
 def short_risk_flags(flags: list[str]) -> str:
@@ -84,65 +334,79 @@ def _item_install_gate_verdict(item: dict[str, object]) -> str:
     return ""
 
 
-def _summary_reason(item: dict[str, object]) -> str:
+def _summary_reason(item: dict[str, object], language: str = "en") -> str:
+    normalized_language = normalize_report_language(language)
     parts: list[str] = []
     final_score = coerce_float(item.get("final_score"))
     if final_score is not None:
-        parts.append(f"score {final_score:.1f}")
+        parts.append(f"{report_text(normalized_language, 'score_word')} {final_score:.1f}")
 
     calls = coerce_int(item.get("calls")) or 0
     recent_30d = coerce_int(item.get("recent_30d_calls"))
     if calls:
-        call_label = "call" if calls == 1 else "calls"
-        parts.append(f"{calls} {call_label}")
+        call_key = "call" if calls == 1 else "calls"
+        if normalized_language == "zh-CN":
+            parts.append(f"{calls}{report_text(normalized_language, call_key)}")
+        else:
+            parts.append(f"{calls} {report_text(normalized_language, call_key)}")
     elif item.get("missing_usage"):
-        parts.append("no matched usage data")
+        parts.append(report_text(normalized_language, "no_usage"))
     if recent_30d:
-        recent_label = "recent call" if recent_30d == 1 else "recent calls"
-        parts.append(f"{recent_30d} {recent_label}")
+        recent_key = "recent_call" if recent_30d == 1 else "recent_calls"
+        if normalized_language == "zh-CN":
+            parts.append(f"近30天 {recent_30d}{report_text(normalized_language, recent_key)}")
+        else:
+            parts.append(f"{recent_30d} {report_text(normalized_language, recent_key)}")
 
     if item.get("missing_ablation"):
-        parts.append("missing ablation")
+        parts.append(report_text(normalized_language, "missing_ablation"))
 
     risk_level = str(item.get("risk_level") or "none")
     risk_flags = list(item.get("risk_flags") or [])
     if risk_level != "none":
         flags = short_risk_flags([str(flag) for flag in risk_flags])
-        parts.append(f"{risk_level} risk" + (f": {flags}" if flags else ""))
+        if normalized_language == "zh-CN":
+            risk_label = {"high": "高", "medium": "中", "low": "低"}.get(risk_level, risk_level)
+            parts.append(f"{risk_label}{report_text(normalized_language, 'risk')}" + (f": {flags}" if flags else ""))
+        else:
+            parts.append(f"{risk_level} {report_text(normalized_language, 'risk')}" + (f": {flags}" if flags else ""))
 
     quality_flags = [str(flag) for flag in list(item.get("quality_flags") or [])]
     if quality_flags:
-        parts.append(f"quality: {short_risk_flags(quality_flags)}")
+        parts.append(f"{report_text(normalized_language, 'quality')}: {short_risk_flags(quality_flags)}")
 
     missing_env = [str(name) for name in list(item.get("missing_required_env") or [])]
     if missing_env:
         suffix = f"+{len(missing_env) - 2} more" if len(missing_env) > 2 else ""
         env_summary = ",".join(missing_env[:2])
-        parts.append(f"missing env: {env_summary}" + (f",{suffix}" if suffix else ""))
+        parts.append(f"{report_text(normalized_language, 'missing_env')}: {env_summary}" + (f",{suffix}" if suffix else ""))
 
     install_gate = _item_install_gate_verdict(item)
     if install_gate in SUMMARY_INSTALL_GATE_VERDICTS:
-        parts.append(f"install gate: {install_gate}")
+        parts.append(f"{report_text(normalized_language, 'install_gate')}: {install_gate}")
 
     action = _item_action(item)
     if not parts:
-        parts.append(action_advice(action, str(item.get("action_reason") or "")))
+        parts.append(action_advice_for_report(action, str(item.get("action_reason") or ""), normalized_language))
     return "; ".join(dict.fromkeys(part for part in parts if part))
 
 
-def _summary_group(title: str, items: list[dict[str, object]], limit: int) -> list[str]:
-    lines = [f"### {title}", ""]
+def _summary_group(title_key: str, items: list[dict[str, object]], limit: int, language: str) -> list[str]:
+    normalized_language = normalize_report_language(language)
+    lines = [f"### {report_text(normalized_language, title_key)}", ""]
     if not items:
-        lines.append("- None.")
+        lines.append(f"- {report_text(normalized_language, 'none')}")
         return lines
+    sentence_end = "。" if normalized_language == "zh-CN" else "."
     for item in items[:limit]:
-        lines.append(f"- {_item_display_name(item)}: `{_item_action(item)}`. {_summary_reason(item)}.")
+        lines.append(f"- {_item_display_name(item)}: `{_item_action(item)}`. {_summary_reason(item, normalized_language)}{sentence_end}")
     if len(items) > limit:
-        lines.append(f"- +{len(items) - limit} more in the evidence tables.")
+        lines.append(f"- {report_text(normalized_language, 'more').format(count=len(items) - limit)}")
     return lines
 
 
-def decision_summary(ranked: list[dict[str, object]], limit: int = 8) -> list[str]:
+def decision_summary(ranked: list[dict[str, object]], limit: int = 8, language: str = "en") -> list[str]:
+    normalized_language = normalize_report_language(language)
     useful = [item for item in ranked if _item_action(item) in KEEP_ACTIONS]
     observe = [item for item in ranked if _item_action(item) == "observe-30d"]
     review = [item for item in ranked if _item_action(item) in REVIEW_ACTIONS]
@@ -158,23 +422,23 @@ def decision_summary(ranked: list[dict[str, object]], limit: int = 8) -> list[st
     ]
 
     lines = [
-        "## Decision Summary",
+        f"## {report_text(normalized_language, 'decision_summary')}",
         "",
-        "This is the reviewer-facing summary. Use the sections below to decide what is useful, what needs evidence, and what needs risk or removal review; the tables after this section are supporting evidence.",
+        report_text(normalized_language, "decision_intro"),
         "",
-        f"- Useful enough to keep: {len(useful)}",
-        f"- Watch for more evidence: {len(observe)}",
-        f"- Needs human review before trusting: {len(review)}",
-        f"- Merge or remove candidates: {len(removal)}",
-        f"- New-install gates: {len(install_gate)}",
+        f"- {report_text(normalized_language, 'useful_count')}: {len(useful)}",
+        f"- {report_text(normalized_language, 'observe_count')}: {len(observe)}",
+        f"- {report_text(normalized_language, 'review_count')}: {len(review)}",
+        f"- {report_text(normalized_language, 'removal_count')}: {len(removal)}",
+        f"- {report_text(normalized_language, 'install_gate_count')}: {len(install_gate)}",
         "",
     ]
     for group in (
-        _summary_group("Useful enough to keep", useful, limit),
-        _summary_group("Watch for more evidence", observe, limit),
-        _summary_group("Needs human review before trusting", review, limit),
-        _summary_group("Merge or remove candidates", removal, limit),
-        _summary_group("New-install gates", install_gate, limit),
+        _summary_group("useful_group", useful, limit, normalized_language),
+        _summary_group("observe_group", observe, limit, normalized_language),
+        _summary_group("review_group", review, limit, normalized_language),
+        _summary_group("removal_group", removal, limit, normalized_language),
+        _summary_group("install_gate_group", install_gate, limit, normalized_language),
     ):
         lines.extend(group)
         lines.append("")
@@ -191,6 +455,24 @@ def risk_review_summary(level: str, evidence: list[dict[str, object]]) -> str:
         "medium": "Medium risk: inspect before trusting.",
         "low": "Low risk: check if expected.",
     }.get(level, "Review recommended.")
+    return f"{prefix} " + " ".join(dict.fromkeys(guidance))
+
+
+def risk_review_summary_for_report(level: str, evidence: list[dict[str, object]], language: str = "en") -> str:
+    if normalize_report_language(language) != "zh-CN":
+        return risk_review_summary(level, evidence)
+    if not evidence:
+        return ""
+    labels = [str(item.get("label", "")) for item in evidence if item.get("label")]
+    guidance = [
+        RISK_REVIEW_GUIDANCE_ZH_CN.get(label, "信任这个技能前先复核该风险信号。")
+        for label in labels[:3]
+    ]
+    prefix = {
+        "high": "高风险：使用前先复核。",
+        "medium": "中风险：信任前先检查。",
+        "low": "低风险：确认是否符合预期。",
+    }.get(level, "建议复核。")
     return f"{prefix} " + " ".join(dict.fromkeys(guidance))
 
 
