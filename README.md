@@ -23,8 +23,7 @@ Start with an inventory-only report:
 
 ```bash
 python codex-skill/scripts/skill_usefulness_audit.py audit \
-  --markdown-out skill-audit-report.md \
-  --json-out skill-audit-report.json
+  --markdown-out skill-audit-report.md
 ```
 
 This mode is `structure-only`. Use it to find broken scripts, bloated references, vague routing, private-looking artifacts, and static risk hints.
@@ -45,16 +44,14 @@ Audit your local Codex skills:
 ```bash
 python codex-skill/scripts/skill_usefulness_audit.py audit \
   --skills-root ~/.codex/skills \
-  --markdown-out skill-audit-report.md \
-  --json-out skill-audit-report.json
+  --markdown-out skill-audit-report.md
 ```
 
 Audit common OpenClaw, Hermes, Claude Code, and Codex locations with default discovery:
 
 ```bash
 python codex-skill/scripts/skill_usefulness_audit.py audit \
-  --markdown-out skill-audit-report.md \
-  --json-out skill-audit-report.json
+  --markdown-out skill-audit-report.md
 ```
 
 Audit multiple roots:
@@ -65,7 +62,6 @@ python codex-skill/scripts/skill_usefulness_audit.py audit \
   --skills-root ~/.codex/plugins/cache \
   --include-system \
   --markdown-out skill-audit-report.md \
-  --json-out skill-audit-report.json \
   --ablation-plan-out skill-ablation-plan.json
 ```
 
@@ -79,7 +75,9 @@ python codex-skill/scripts/skill_usefulness_audit.py audit \
 | `bloated-helper` | 5.2 | `review-burden` | high activation, little impact, heavy references/assets |
 | `shell-installer` | 6.4 | `quarantine-review` | useful, but high-risk execution pattern (`risk_score >= 4.0`) |
 
-The Markdown report is for humans. It starts with a Decision Summary that groups skills into keep, observe, human-review, merge/remove, and new-install-gate buckets before the evidence tables. The JSON report is for automation and keeps the same evidence in machine-readable form. The cost-efficient ablation plan is written only when `--ablation-plan-out` is provided.
+The Markdown report is the default user-facing artifact. It starts with a Decision Summary that groups skills into keep, observe, human-review, merge/remove, and new-install-gate buckets before the evidence tables. Write a JSON report only when the user asks for raw data, machine-readable evidence, or automation input. The cost-efficient ablation plan is written only when `--ablation-plan-out` is provided.
+
+When returning results in chat: Do not paste raw JSON unless the user asks for it. Use `codex-skill/references/report-narration-prompt.md` to turn the Markdown or JSON evidence into a short conversational summary.
 
 Use `--report-language zh-CN` when the user invokes the audit in Chinese. Use `--report-language en` for English. `auto` and unsupported values fall back to English so unclear prompts do not produce low-quality localization. This option only changes Markdown wording; JSON field names, action codes, risk flags, and scores remain stable.
 
@@ -113,6 +111,7 @@ The tool works with no extra files, but direct evidence gives better results.
 | `--ablation-file` | JSON, JSONL | skill-on versus skill-off cases |
 | `--community-file` | JSON, JSONL, CSV, TSV | `rating`, `downloads`, `installs_current`, `installs_all_time`, `trending_7d`, `stars`, `comments_count`, `last_updated` |
 | `--report-language` | `auto`, `en`, `zh-CN` | Markdown display language; unsupported or unclear values fall back to English |
+| `--json-out` | JSON | optional raw machine-readable report; use only when requested or when another tool will consume it |
 | `--ablation-plan-out` | JSON | cost-efficient ablation plan with candidate skills, early-stop rules, and model-cost estimates |
 
 Minimal `usage.json`:
@@ -134,7 +133,7 @@ Minimal `usage.json`:
 
 This tool does not automatically replay historical conversations. It creates an ablation plan and reads ablation result files that you provide.
 
-History and usage files may contain sensitive conversations, local paths, project names, and customer data. Prefer local execution and redact secrets before sharing reports. JSON output may include local paths and evidence notes.
+History and usage files may contain sensitive conversations, local paths, project names, and customer data. Prefer local execution and redact secrets before sharing reports. JSON output may include local paths and evidence notes, so do not expose it by default in chat.
 
 Missing env means not configured in the current audit process, not proof that the skill is broken in every host.
 

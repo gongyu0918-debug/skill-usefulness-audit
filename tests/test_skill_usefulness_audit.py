@@ -1892,6 +1892,9 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
         ablation_protocol = (REPO_ROOT / "codex-skill" / "references" / "ablation-protocol.md").read_text(
             encoding="utf-8"
         )
+        narration_prompt = (REPO_ROOT / "codex-skill" / "references" / "report-narration-prompt.md").read_text(
+            encoding="utf-8"
+        )
 
         for text in (readme, source_skill, bundle_skill):
             self.assertIn("Do not delete skills based only on a structure-only report.", text)
@@ -1901,13 +1904,19 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
             self.assertIn("Borrowed Idea Gate", text)
             self.assertIn("Decision Summary", text)
             self.assertIn("report-language", text)
+            self.assertIn("report-narration-prompt.md", text)
+            self.assertIn("Do not paste raw JSON", text)
 
         self.assertIn("## Safe First Run", readme)
+        safe_first_run = readme.split("## Safe First Run", 1)[1].split("## Borrowed Idea Gate", 1)[0]
+        self.assertNotIn("--json-out", safe_first_run)
         self.assertIn('"recent_30d_calls": 4', readme)
         self.assertIn("baseline command", readme)
         self.assertIn("rollback condition", readme)
         self.assertIn("Borrowed idea validation", ablation_protocol)
         self.assertIn("same input fixture", ablation_protocol)
+        self.assertIn("Do not paste raw JSON", narration_prompt)
+        self.assertIn("manual-review recommendations", narration_prompt)
         self.assertIn("not for code review or human skills", bundle_skill)
 
     def test_markdown_table_escapes_headers(self) -> None:

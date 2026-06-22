@@ -57,7 +57,7 @@ Examples: Excel, DOCX, PDF, browser automation, deployment, OCR, external API wr
 3. Read installed `SKILL.md` files plus script/reference/asset metrics.
 4. Classify skills as `api`, `tool`, or `general`; protect `api` and `tool` skills from fake no-tool ablation.
 5. Score usage, overlap, impact, quality burden, confidence, community prior, and static risk.
-6. Render Markdown/JSON reports with conservative human-review actions.
+6. Render a Markdown report with conservative human-review actions.
 7. Write a cost-efficient ablation plan only when `--ablation-plan-out` is provided.
 
 ## Ablation Rules
@@ -85,7 +85,6 @@ python scripts/skill_usefulness_audit.py audit \
   --community-file ./community.json \
   --report-language auto \
   --markdown-out ./skill-audit-report.md \
-  --json-out ./skill-audit-report.json \
   --ablation-plan-out ./skill-ablation-plan.json
 ```
 
@@ -99,6 +98,7 @@ Input contracts:
 - `--ablation-file`: normalized JSON or JSONL with skill-on versus skill-off case results.
 - `--community-file`: optional offline JSON, JSONL, CSV, or TSV registry metrics.
 - `--report-language`: Markdown display language. Pass `zh-CN` when the user invoked the skill in Chinese, `en` for English, and `auto` or omit it when the language is unclear. Unsupported values fall back to English.
+- `--json-out`: optional raw machine-readable report. Use it only when the user asks for JSON/raw data, another tool will consume the evidence, or you need a private local artifact for verification. Do not paste raw JSON into chat unless requested.
 - `--ablation-plan-out`: optional JSON plan that estimates model cost and narrows ablation to high-value candidates.
 - `--ablation-baseline-cases`, `--ablation-initial-cases`, `--ablation-expand-cases`, `--ablation-max-cases`: optional case-count overrides for the ablation plan.
 
@@ -114,6 +114,8 @@ Return a front-of-report Decision Summary first, then the full score table, reco
 
 For Markdown reports, match the user's invocation language when it is supported. Keep skill names, file paths, CLI flags, env vars, action codes, risk flags, and JSON field names in English. If the user language is unsupported or unclear, use English.
 
+Use `references/report-narration-prompt.md` to turn the report into a short conversational follow-up. The chat response should summarize decisions in plain language and mention the Markdown path; it should not expose the raw JSON file unless the user explicitly asked for it.
+
 JSON includes `report_mode`, per-skill `score_breakdown`, `quality_penalty`, `quality_penalty_uncapped`, `quality_evidence`, `community_breakdown`, `action_advice`, and `risk_review`. It includes `ablation_plan` only when `--ablation-plan-out` is used.
 
 Keep deletion advice conservative for system or host-core skills.
@@ -123,6 +125,7 @@ Treat `delete`, `merge-delete`, and `quarantine-review` as manual-review recomme
 ## Resources
 
 - `scripts/skill_usefulness_audit.py`: compatibility wrapper for the modular audit package.
-- `scripts/skill_usefulness_audit_lib/`: collect metadata, score skills, scan static risk hints, and render Markdown/JSON tables.
+- `scripts/skill_usefulness_audit_lib/`: collect metadata, score skills, scan static risk hints, and render Markdown reports plus optional JSON artifacts.
+- `references/report-narration-prompt.md`: concise prompt for turning the report into a user-facing conversational summary.
 - `references/scoring-rubric.md`: 10-point scoring rules, confidence logic, community prior, and action thresholds.
 - `references/ablation-protocol.md`: normalized replay method for historical conversation tests.
