@@ -121,7 +121,7 @@ Missing env means not configured in the current audit process, not proof that th
 
 ## Output Contract
 
-Return a full score table, recommended actions, delete/merge candidates when present, missing evidence, quality burden, and risk review when relevant.
+Return a front-of-report Decision Summary first, then the full score table, recommended actions, delete/merge candidates when present, missing evidence, quality burden, and risk review when relevant.
 
 JSON includes `report_mode`, per-skill `score_breakdown`, `quality_penalty`, `quality_penalty_uncapped`, `quality_evidence`, `community_breakdown`, `action_advice`, and `risk_review`. It includes `ablation_plan` only when `--ablation-plan-out` is used.
 

@@ -79,7 +79,7 @@ python codex-skill/scripts/skill_usefulness_audit.py audit \
 | `bloated-helper` | 5.2 | `review-burden` | high activation, little impact, heavy references/assets |
 | `shell-installer` | 6.4 | `quarantine-review` | useful, but high-risk execution pattern (`risk_score >= 4.0`) |
 
-The Markdown report is for humans. The JSON report is for automation and keeps the same evidence in machine-readable form. The cost-efficient ablation plan is written only when `--ablation-plan-out` is provided.
+The Markdown report is for humans. It starts with a Decision Summary that groups skills into keep, observe, human-review, merge/remove, and new-install-gate buckets before the evidence tables. The JSON report is for automation and keeps the same evidence in machine-readable form. The cost-efficient ablation plan is written only when `--ablation-plan-out` is provided.
 
 ## How To Read The Report
 
@@ -89,6 +89,7 @@ The Markdown report is for humans. The JSON report is for automation and keeps t
 - `final_score`: `local_score - quality_penalty`, used for ranking and action suggestions.
 - `confidence_score`: how much evidence backs the score.
 - `report_mode`: `strong-evidence`, `partial-evidence`, or `structure-only`.
+- `Decision Summary`: the front-of-report human summary for what is useful, what needs more evidence, and what needs review before use or removal.
 - `score_breakdown`: per-skill explanation of each score component.
 - `risk_level` / `static_risk_level`: static execution-surface hints from scripts and runnable resources.
 - `community_prior_score`: optional registry signal for review priority and replacement checks.

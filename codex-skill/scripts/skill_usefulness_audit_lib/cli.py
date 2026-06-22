@@ -350,6 +350,8 @@ def run_audit(args: argparse.Namespace) -> int:
         f"- Recommended actions: {len(recommended_actions)}",
         f"- Delete candidates: {len(delete_candidates)}",
         "",
+        *decision_summary(ranked),
+        "",
         "## Score Table",
         "",
         markdown_table(

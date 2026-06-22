@@ -34,6 +34,25 @@ ACTION_ADVICE = {
     "keep-system": "Keep it as a system skill.",
 }
 
+KEEP_ACTIONS = {"keep", "keep-narrow", "keep-system"}
+REVIEW_ACTIONS = {
+    "merge-or-review",
+    "quarantine-review",
+    "review-risk",
+    "review-system",
+    "keep-review-risk",
+    "keep-review-burden",
+    "review-burden",
+    "review-vs-community",
+    "review",
+}
+REMOVE_ACTIONS = {"delete", "merge-delete"}
+SUMMARY_INSTALL_GATE_VERDICTS = {
+    "block-before-install",
+    "review-before-install",
+    "warn-before-install",
+}
+
 
 def action_advice(action: str, reason: str) -> str:
     if action in ACTION_ADVICE:
@@ -48,6 +67,118 @@ def short_risk_flags(flags: list[str]) -> str:
     if not flags:
         return ""
     return ",".join(flags[:2])
+
+
+def _item_display_name(item: dict[str, object]) -> str:
+    return str(item.get("display_name") or item.get("name") or "unknown-skill")
+
+
+def _item_action(item: dict[str, object]) -> str:
+    return str(item.get("action") or "review")
+
+
+def _item_install_gate_verdict(item: dict[str, object]) -> str:
+    install_gate = item.get("install_gate")
+    if isinstance(install_gate, dict):
+        return str(install_gate.get("verdict") or "")
+    return ""
+
+
+def _summary_reason(item: dict[str, object]) -> str:
+    parts: list[str] = []
+    final_score = coerce_float(item.get("final_score"))
+    if final_score is not None:
+        parts.append(f"score {final_score:.1f}")
+
+    calls = coerce_int(item.get("calls")) or 0
+    recent_30d = coerce_int(item.get("recent_30d_calls"))
+    if calls:
+        call_label = "call" if calls == 1 else "calls"
+        parts.append(f"{calls} {call_label}")
+    elif item.get("missing_usage"):
+        parts.append("no matched usage data")
+    if recent_30d:
+        recent_label = "recent call" if recent_30d == 1 else "recent calls"
+        parts.append(f"{recent_30d} {recent_label}")
+
+    if item.get("missing_ablation"):
+        parts.append("missing ablation")
+
+    risk_level = str(item.get("risk_level") or "none")
+    risk_flags = list(item.get("risk_flags") or [])
+    if risk_level != "none":
+        flags = short_risk_flags([str(flag) for flag in risk_flags])
+        parts.append(f"{risk_level} risk" + (f": {flags}" if flags else ""))
+
+    quality_flags = [str(flag) for flag in list(item.get("quality_flags") or [])]
+    if quality_flags:
+        parts.append(f"quality: {short_risk_flags(quality_flags)}")
+
+    missing_env = [str(name) for name in list(item.get("missing_required_env") or [])]
+    if missing_env:
+        suffix = f"+{len(missing_env) - 2} more" if len(missing_env) > 2 else ""
+        env_summary = ",".join(missing_env[:2])
+        parts.append(f"missing env: {env_summary}" + (f",{suffix}" if suffix else ""))
+
+    install_gate = _item_install_gate_verdict(item)
+    if install_gate in SUMMARY_INSTALL_GATE_VERDICTS:
+        parts.append(f"install gate: {install_gate}")
+
+    action = _item_action(item)
+    if not parts:
+        parts.append(action_advice(action, str(item.get("action_reason") or "")))
+    return "; ".join(dict.fromkeys(part for part in parts if part))
+
+
+def _summary_group(title: str, items: list[dict[str, object]], limit: int) -> list[str]:
+    lines = [f"### {title}", ""]
+    if not items:
+        lines.append("- None.")
+        return lines
+    for item in items[:limit]:
+        lines.append(f"- {_item_display_name(item)}: `{_item_action(item)}`. {_summary_reason(item)}.")
+    if len(items) > limit:
+        lines.append(f"- +{len(items) - limit} more in the evidence tables.")
+    return lines
+
+
+def decision_summary(ranked: list[dict[str, object]], limit: int = 8) -> list[str]:
+    useful = [item for item in ranked if _item_action(item) in KEEP_ACTIONS]
+    observe = [item for item in ranked if _item_action(item) == "observe-30d"]
+    review = [item for item in ranked if _item_action(item) in REVIEW_ACTIONS]
+    removal = [
+        item
+        for item in ranked
+        if _item_action(item) in REMOVE_ACTIONS or bool(item.get("delete_candidate"))
+    ]
+    install_gate = [
+        item
+        for item in ranked
+        if _item_install_gate_verdict(item) in SUMMARY_INSTALL_GATE_VERDICTS
+    ]
+
+    lines = [
+        "## Decision Summary",
+        "",
+        "This is the reviewer-facing summary. Use the sections below to decide what is useful, what needs evidence, and what needs risk or removal review; the tables after this section are supporting evidence.",
+        "",
+        f"- Useful enough to keep: {len(useful)}",
+        f"- Watch for more evidence: {len(observe)}",
+        f"- Needs human review before trusting: {len(review)}",
+        f"- Merge or remove candidates: {len(removal)}",
+        f"- New-install gates: {len(install_gate)}",
+        "",
+    ]
+    for group in (
+        _summary_group("Useful enough to keep", useful, limit),
+        _summary_group("Watch for more evidence", observe, limit),
+        _summary_group("Needs human review before trusting", review, limit),
+        _summary_group("Merge or remove candidates", removal, limit),
+        _summary_group("New-install gates", install_gate, limit),
+    ):
+        lines.extend(group)
+        lines.append("")
+    return lines[:-1]
 
 
 def risk_review_summary(level: str, evidence: list[dict[str, object]]) -> str:
