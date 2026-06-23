@@ -1835,7 +1835,7 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
         bundle_script = (isolated_repo / "skill" / "scripts" / "skill_usefulness_audit.py").read_text(encoding="utf-8")
         self.assertIn("slug: skill-usefulness-audit", bundle_skill)
         self.assertIn(f"version: {CURRENT_VERSION}", bundle_skill)
-        self.assertIn("Audit installed agent-skill packages for cleanup", bundle_skill)
+        self.assertIn("Audit or inventory installed agent-skill packages for cleanup", bundle_skill)
         self.assertIn('"requires":{"bins":["python"]}', bundle_skill)
         self.assertNotIn('"requires_toolsets":["terminal"]', bundle_skill)
         self.assertNotIn("Hermes", bundle_skill)

@@ -1,7 +1,7 @@
 ---
 name: skill-usefulness-audit
 slug: skill-usefulness-audit
-description: Audit installed agent-skill packages for cleanup using usage, overlap, burden, risk, and optional ablation/community evidence. Trigger only on explicit requests to review installed agent skills; not for code review or human skills.
+description: Audit or inventory installed agent-skill packages for cleanup using usage, overlap, burden, risk, and optional ablation/community evidence. Trigger only on explicit requests to review installed agent skills, analyze installed skill usage, or run a structure-only skill inventory; not for code review or human skills.
 version: 0.3.3
 tags: ["audit","skills","ablation","openclaw"]
 user-invocable: true
@@ -27,7 +27,7 @@ OpenClaw picks up installed workspace skills in the next session. For other agen
 
 ## Overview
 
-Use this skill to judge whether installed skills still deserve to stay installed.
+Use this skill to judge whether installed agent skills still deserve to stay installed.
 It turns vague "this feels useless" opinions into a repeatable audit based on usage evidence, overlap, outcome impact, quality burden, confidence, community prior, and static risk hints.
 
 ## Manual Trigger Only
@@ -35,6 +35,7 @@ It turns vague "this feels useless" opinions into a repeatable audit based on us
 Run this skill only after a direct user request.
 Do not invoke it implicitly during normal task execution.
 Do not use it for general code review, general security audit, employee skill assessment, or normal task execution.
+Valid direct requests include installed agent skill cleanup, installed skill usage analysis, duplicate/overlap checks, and structure-only inventories of an agent skill library.
 
 ## Safety
 
