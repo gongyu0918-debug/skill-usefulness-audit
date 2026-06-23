@@ -1919,6 +1919,121 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
         self.assertIn("manual-review recommendations", narration_prompt)
         self.assertIn("not for code review or human skills", bundle_skill)
 
+    def test_skill_trigger_boundary_prompt_matrix(self) -> None:
+        source_skill = (REPO_ROOT / "codex-skill" / "SKILL.md").read_text(encoding="utf-8")
+        bundle_skill = (REPO_ROOT / "skill" / "SKILL.md").read_text(encoding="utf-8")
+        for text in (source_skill, bundle_skill):
+            self.assertIn("Trigger only on explicit requests", text)
+            self.assertIn("analyze installed skill usage", text)
+            self.assertIn("structure-only skill inventory", text)
+            self.assertIn("not for code review or human skills", text)
+            self.assertIn("general security audit", text)
+
+        def contract_triggers(prompt: str) -> bool:
+            text = prompt.lower()
+            direct = "skill-usefulness-audit" in text or "$skill-usefulness-audit" in text
+            negative_terms = (
+                "code review",
+                "pr review",
+                "pull request",
+                "security audit",
+                "employee",
+                "human skill",
+                "create a new codex skill",
+                "install the best",
+                "install a skill",
+                "代码审查",
+                "安全审计",
+                "员工",
+                "人类技能",
+                "创建一个",
+                "安装一个",
+                "润色",
+            )
+            if any(term in text for term in negative_terms) and not direct:
+                return False
+            installed_skill_terms = (
+                "installed agent skills",
+                "installed skills",
+                "agent skills",
+                "openclaw skills",
+                "codex skills",
+                "clawhub skills",
+                "skill inventory",
+                "agent skill library",
+                "installed skill usage",
+                "structure-only",
+                "~/.codex/skills",
+                "~/.openclaw/skills",
+                "已安装",
+                "agent 技能",
+                "agent 技能库",
+                "openclaw 技能",
+                "codex 技能",
+                "clawhub 技能",
+                "技能库",
+                "工具类 skill",
+            )
+            audit_terms = (
+                "audit",
+                "review",
+                "cleanup",
+                "usefulness",
+                "delete",
+                "keep",
+                "merge",
+                "overlap",
+                "duplicate",
+                "ablation",
+                "usage",
+                "trigger",
+                "inventory",
+                "清理",
+                "审计",
+                "评估",
+                "有用",
+                "删除",
+                "保留",
+                "合并",
+                "重复",
+                "重叠",
+                "消融",
+                "调用",
+                "触发",
+                "误触发",
+                "盘点",
+            )
+            return any(term in text for term in installed_skill_terms) and (
+                direct or any(term in text for term in audit_terms)
+            )
+
+        cases = [
+            ("positive", "请审计我已安装的 OpenClaw 技能，告诉我哪些该保留、观察、删除", True),
+            ("positive", "Run skill-usefulness-audit on ~/.codex/skills with usage.json", True),
+            ("positive", "Review installed agent skills for cleanup using usage and ablation evidence", True),
+            ("positive", "检查我装的 ClawHub 技能有没有重复和过宽触发", True),
+            ("positive", "Generate a structure-only skill inventory for this agent skill library", True),
+            ("positive", "分析所有工具类 skill 的 usage 数据", True),
+            ("negative", "Please code review this PR for bugs", False),
+            ("negative", "Security audit my auth middleware", False),
+            ("negative", "Install the best PDF skill", False),
+            ("negative", "Create a new Codex skill", False),
+            ("negative", "Audit my team's employee skill matrix", False),
+            ("negative", "润色这篇中文公文", False),
+            ("boundary", "这个 skill 有用吗？", False),
+            ("boundary", "列出我安装了哪些 skills", False),
+            ("boundary", "我想清理 ~/.openclaw/skills，哪些可以删？", True),
+            ("boundary", "Compare browser skill and chrome skill overlap in installed skills", True),
+            ("boundary", "Review this skill's Python code for vulnerabilities", False),
+            ("boundary", "对 agent 技能库做一次 structure-only 盘点", True),
+        ]
+        failures = [
+            {"group": group, "prompt": prompt, "expected": expected, "actual": contract_triggers(prompt)}
+            for group, prompt, expected in cases
+            if contract_triggers(prompt) != expected
+        ]
+        self.assertEqual(failures, [])
+
     def test_markdown_table_escapes_headers(self) -> None:
         table = AUDIT_MODULE.markdown_table(["A|B"], [["1|2"]])
         self.assertIn("A\\|B", table)

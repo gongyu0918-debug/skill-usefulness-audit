@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.4
+
+- Clarify trigger boundaries for installed skill usage analysis and structure-only skill inventory requests
+- Add a prompt-matrix regression test covering trigger, non-trigger, and boundary scenarios
+
 ## 0.3.3
 
 - Add a front-of-report Decision Summary so humans see keep, observe, review, removal, and install-gate buckets before evidence tables
