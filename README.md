@@ -180,5 +180,5 @@ python codex-skill/scripts/skill_usefulness_audit.py audit \
 
 ```bash
 python scripts/sync_bundle.py
-clawhub publish ./skill --slug skill-usefulness-audit --name "skill-usefulness-audit" --version 0.3.4 --tags latest,audit,skills,openclaw --changelog "Clarify trigger boundaries and add prompt-matrix regression coverage"
+clawhub publish ./skill --slug skill-usefulness-audit --name "skill-usefulness-audit" --version 0.3.5 --tags latest,audit,skills,openclaw --changelog "Preserve CJK skill names, parse fallback frontmatter lists, and compact zh-CN decision summaries"
 ```

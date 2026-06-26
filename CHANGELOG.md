@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.5
+
+- Preserve CJK skill names during skill identity normalization
+- Parse simple block-list frontmatter without PyYAML in fallback environments
+- Compact zh-CN Decision Summary output to five rows per group with Chinese punctuation
+- Keep the OpenClaw bundle synced from source after the minimal audit fixes
+
 ## 0.3.4
 
 - Clarify trigger boundaries for installed skill usage analysis and structure-only skill inventory requests
