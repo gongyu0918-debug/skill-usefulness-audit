@@ -12,10 +12,17 @@ def clamp(value: float, low: float, high: float) -> float:
 
 
 def normalize_name(value: str) -> str:
-    value = value.strip().lower()
-    value = re.sub(r"[^a-z0-9]+", "-", value)
-    value = re.sub(r"-{2,}", "-", value)
-    return value.strip("-")
+    parts: list[str] = []
+    pending_separator = False
+    for char in value.strip().lower():
+        if (ord(char) < 128 and char.isalnum()) or is_cjk_char(char):
+            if pending_separator and parts:
+                parts.append("-")
+            parts.append(char)
+            pending_separator = False
+        else:
+            pending_separator = bool(parts)
+    return "".join(parts).strip("-")
 
 
 def normalize_pathish(value) -> str | None:
@@ -161,6 +168,21 @@ def parse_frontmatter(text: str) -> tuple[dict[str, object], str]:
                     parts.append(part)
                 index += 1
             data[key] = (" " if raw_value == ">" else "\n").join(parts)
+            continue
+        if raw_value == "":
+            items: list[object] = []
+            while index < len(yaml_lines):
+                item_line = yaml_lines[index]
+                item_stripped = item_line.strip()
+                if not item_stripped:
+                    index += 1
+                    continue
+                if not item_line[:1].isspace() or not item_stripped.startswith("- "):
+                    break
+                items.append(parse_frontmatter_scalar(item_stripped[2:]))
+                index += 1
+            if items:
+                data[key] = items
             continue
         if raw_value:
             data[key] = parse_frontmatter_scalar(raw_value)

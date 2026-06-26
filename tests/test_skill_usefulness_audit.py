@@ -92,6 +92,50 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
         with mock.patch.object(shutil, "rmtree", side_effect=PermissionError("locked temp file")):
             remove_tree(locked)
 
+    def test_normalize_name_preserves_cjk_skill_names(self) -> None:
+        self.assertEqual(AUDIT_MODULE.normalize_name("中文 技能"), "中文-技能")
+        self.assertEqual(AUDIT_MODULE.normalize_name("Tone_助手"), "tone-助手")
+
+    def test_fallback_frontmatter_parses_block_lists_without_pyyaml(self) -> None:
+        import skill_usefulness_audit_lib.common as common
+
+        text = (
+            "---\n"
+            "name: list-frontmatter\n"
+            "tags:\n"
+            "  - audit\n"
+            "  - skills\n"
+            "---\n\n"
+            "# Body\n"
+        )
+
+        with mock.patch.object(common, "yaml", None):
+            metadata, body = common.parse_frontmatter(text)
+
+        self.assertEqual(metadata["name"], "list-frontmatter")
+        self.assertEqual(metadata["tags"], ["audit", "skills"])
+        self.assertEqual(body, "# Body\n")
+
+    def test_zh_decision_summary_uses_compact_default_limit_and_cjk_punctuation(self) -> None:
+        ranked = [
+            {
+                "name": f"skill-{index}",
+                "display_name": f"skill-{index}",
+                "action": "keep",
+                "final_score": 9.1,
+                "calls": 1,
+            }
+            for index in range(6)
+        ]
+
+        report = "\n".join(AUDIT_MODULE.decision_summary(ranked, language="zh-CN"))
+
+        self.assertIn("- skill-0: `keep`。分数 9.1; 1次调用。", report)
+        self.assertNotIn("`keep`. 分数", report)
+        self.assertNotIn("`keep`。 分数", report)
+        self.assertIn("- 其余 1 个见后面的证据表。", report)
+        self.assertNotIn("- skill-5:", report)
+
     def run_audit(self, *args: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [sys.executable, str(AUDIT_SCRIPT), "audit", *args],
@@ -1334,8 +1378,8 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
         self.assertIn("- 建议保留: 1", report)
         self.assertIn("- 继续观察并补证据: 1", report)
         self.assertIn("### 需要人工复核后再信任", report)
-        self.assertIn("clean-keeper: `keep`. 分数 8.0; 12次调用; 近30天 8次调用; 缺少消融证据。", report)
-        self.assertIn("needs-evidence: `observe-30d`. 分数 4.0; 没有匹配的使用数据; 缺少消融证据。", report)
+        self.assertIn("clean-keeper: `keep`。分数 8.0; 12次调用; 近30天 8次调用; 缺少消融证据。", report)
+        self.assertIn("needs-evidence: `observe-30d`。分数 4.0; 没有匹配的使用数据; 缺少消融证据。", report)
         self.assertIn("network-installer: `quarantine-review`", report)
         self.assertIn("安装门禁: block-before-install", report)
         self.assertIn("## 评分表", report)
@@ -1917,7 +1961,7 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
         self.assertIn("same input fixture", ablation_protocol)
         self.assertIn("Do not paste raw JSON", narration_prompt)
         self.assertIn("manual-review recommendations", narration_prompt)
-        self.assertIn("not for code review or human skills", bundle_skill)
+        self.assertIn("not for ordinary repository code review, general security audit, or human skills", bundle_skill)
 
     def test_skill_trigger_boundary_prompt_matrix(self) -> None:
         source_skill = (REPO_ROOT / "codex-skill" / "SKILL.md").read_text(encoding="utf-8")
@@ -1926,7 +1970,8 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
             self.assertIn("Trigger only on explicit requests", text)
             self.assertIn("analyze installed skill usage", text)
             self.assertIn("structure-only skill inventory", text)
-            self.assertIn("not for code review or human skills", text)
+            self.assertIn("not for ordinary repository", text)
+            self.assertIn("human skills", text)
             self.assertIn("general security audit", text)
 
         def contract_triggers(prompt: str) -> bool:
