@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.6
+
+- Preserve nested OpenClaw metadata and required env fields in no-PyYAML fallback parsing and bundle sync
+- Preserve Hangul, Hiragana, and Katakana skill names during identity normalization
+- Flag empty or meaningless skill contracts and missing local Python imports as quality burdens below keep tier
+- Flag broken reference file links, undisclosed single-reference routes, and reference advertising/upsell/unrelated text
+- Add `--show-duplicate-installs` for source-vs-bundle parity audits while keeping default install-identity dedupe
+
 ## 0.3.5
 
 - Preserve CJK skill names during skill identity normalization

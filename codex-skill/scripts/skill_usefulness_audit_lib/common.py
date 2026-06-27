@@ -44,7 +44,15 @@ def is_cjk_char(char: str) -> bool:
     code = ord(char)
     return (
         0x3400 <= code <= 0x4DBF
+        or 0x3040 <= code <= 0x309F
+        or 0x30A0 <= code <= 0x30FF
+        or 0x31F0 <= code <= 0x31FF
         or 0x4E00 <= code <= 0x9FFF
+        or 0xAC00 <= code <= 0xD7AF
+        or 0x1100 <= code <= 0x11FF
+        or 0x3130 <= code <= 0x318F
+        or 0xA960 <= code <= 0xA97F
+        or 0xD7B0 <= code <= 0xD7FF
         or 0xF900 <= code <= 0xFAFF
         or 0x20000 <= code <= 0x2A6DF
         or 0x2A700 <= code <= 0x2B73F
@@ -116,6 +124,85 @@ def safe_frontmatter_mapping(raw_yaml: str) -> dict[str, object] | None:
     return {str(key): json_safe_value(value) for key, value in data.items()}
 
 
+def fallback_frontmatter_mapping(raw_yaml: str) -> dict[str, object]:
+    yaml_lines = raw_yaml.splitlines()
+
+    def line_indent(value: str) -> int:
+        return len(value) - len(value.lstrip(" "))
+
+    def next_content_index(index: int) -> int | None:
+        while index < len(yaml_lines):
+            stripped = yaml_lines[index].strip()
+            if stripped and not stripped.startswith("#"):
+                return index
+            index += 1
+        return None
+
+    def parse_block(index: int, indent: int) -> tuple[object, int]:
+        mapping: dict[str, object] = {}
+        sequence: list[object] = []
+        mode: str | None = None
+        while index < len(yaml_lines):
+            line = yaml_lines[index]
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                index += 1
+                continue
+            current_indent = line_indent(line)
+            if current_indent < indent:
+                break
+            if current_indent > indent:
+                break
+            if stripped.startswith("- "):
+                mode = mode or "sequence"
+                if mode != "sequence":
+                    break
+                raw_item = stripped[2:].strip()
+                index += 1
+                if raw_item:
+                    sequence.append(parse_frontmatter_scalar(raw_item))
+                else:
+                    nested, index = parse_block(index, indent + 2)
+                    sequence.append(nested)
+                continue
+            if ":" not in stripped:
+                break
+            mode = mode or "mapping"
+            if mode != "mapping":
+                break
+            key, raw_value = stripped.split(":", 1)
+            key = key.strip()
+            raw_value = raw_value.strip()
+            index += 1
+            if raw_value in {">", "|"}:
+                parts: list[str] = []
+                while index < len(yaml_lines):
+                    part_line = yaml_lines[index]
+                    part_stripped = part_line.strip()
+                    if part_stripped and line_indent(part_line) <= current_indent:
+                        break
+                    if part_stripped:
+                        parts.append(part_stripped)
+                    index += 1
+                mapping[key] = (" " if raw_value == ">" else "\n").join(parts)
+                continue
+            if raw_value:
+                mapping[key] = parse_frontmatter_scalar(raw_value)
+                continue
+            content_index = next_content_index(index)
+            if content_index is None or line_indent(yaml_lines[content_index]) <= current_indent:
+                mapping[key] = {}
+                continue
+            nested, index = parse_block(index, line_indent(yaml_lines[content_index]))
+            mapping[key] = nested
+        if mode == "sequence":
+            return sequence, index
+        return mapping, index
+
+    parsed, _index = parse_block(0, 0)
+    return parsed if isinstance(parsed, dict) else {}
+
+
 def json_safe_value(value):
     if isinstance(value, dict):
         return {str(key): json_safe_value(item) for key, item in value.items()}
@@ -146,47 +233,7 @@ def parse_frontmatter(text: str) -> tuple[dict[str, object], str]:
     if parsed is not None:
         return parsed, body
 
-    data: dict[str, object] = {}
-    yaml_lines = raw_yaml.splitlines()
-    index = 0
-    while index < len(yaml_lines):
-        line = yaml_lines[index]
-        stripped = line.strip()
-        index += 1
-        if not stripped or stripped.startswith("#") or line[:1].isspace():
-            continue
-        if ":" not in stripped:
-            continue
-        key, raw_value = stripped.split(":", 1)
-        key = key.strip()
-        raw_value = raw_value.strip()
-        if raw_value in {">", "|"}:
-            parts: list[str] = []
-            while index < len(yaml_lines) and (yaml_lines[index][:1].isspace() or not yaml_lines[index].strip()):
-                part = yaml_lines[index].strip()
-                if part:
-                    parts.append(part)
-                index += 1
-            data[key] = (" " if raw_value == ">" else "\n").join(parts)
-            continue
-        if raw_value == "":
-            items: list[object] = []
-            while index < len(yaml_lines):
-                item_line = yaml_lines[index]
-                item_stripped = item_line.strip()
-                if not item_stripped:
-                    index += 1
-                    continue
-                if not item_line[:1].isspace() or not item_stripped.startswith("- "):
-                    break
-                items.append(parse_frontmatter_scalar(item_stripped[2:]))
-                index += 1
-            if items:
-                data[key] = items
-            continue
-        if raw_value:
-            data[key] = parse_frontmatter_scalar(raw_value)
-    return data, body
+    return fallback_frontmatter_mapping(raw_yaml), body
 
 
 def mapping_from_value(value) -> dict[str, object]:

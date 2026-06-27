@@ -116,6 +116,218 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
         self.assertEqual(metadata["tags"], ["audit", "skills"])
         self.assertEqual(body, "# Body\n")
 
+    def test_fallback_frontmatter_preserves_nested_openclaw_metadata_without_pyyaml(self) -> None:
+        import skill_usefulness_audit_lib.common as common
+
+        skill_dir = self.tempdir / "nested-frontmatter"
+        skill_dir.mkdir()
+        (skill_dir / "SKILL.md").write_text(
+            "---\n"
+            "name: nested-frontmatter\n"
+            "description: Call configured external API providers.\n"
+            "metadata:\n"
+            "  openclaw:\n"
+            "    skillKey: nested-frontmatter-key\n"
+            "    requires:\n"
+            "      env:\n"
+            "        - SKILL_AUDIT_NESTED_KEY\n"
+            "---\n\n"
+            "# Nested Frontmatter\n",
+            encoding="utf-8",
+        )
+
+        with mock.patch.object(common, "yaml", None):
+            skill = AUDIT_MODULE.scan_skill(skill_dir / "SKILL.md")
+
+        self.assertEqual(skill["skill_key"], "nested-frontmatter-key")
+        self.assertIn("skill:nested-frontmatter-key", skill["install_identities"])
+        self.assertEqual(skill["required_env"], ["SKILL_AUDIT_NESTED_KEY"])
+        self.assertEqual(skill["missing_required_env"], ["SKILL_AUDIT_NESTED_KEY"])
+
+    def test_fallback_frontmatter_nested_skill_key_dedupes_without_pyyaml(self) -> None:
+        import skill_usefulness_audit_lib.common as common
+
+        skills_root = self.tempdir / "skills"
+        for suffix in ("a", "b"):
+            skill_dir = skills_root / f"nested-duplicate-{suffix}"
+            skill_dir.mkdir(parents=True)
+            (skill_dir / "SKILL.md").write_text(
+                "---\n"
+                f"name: nested-duplicate-{suffix}\n"
+                "description: Call configured external API providers.\n"
+                "metadata:\n"
+                "  openclaw:\n"
+                "    skillKey: nested-shared-key\n"
+                "---\n\n"
+                f"# Nested Duplicate {suffix}\n",
+                encoding="utf-8",
+            )
+
+        with mock.patch.object(common, "yaml", None):
+            files = AUDIT_MODULE.discover_skill_files([skills_root], include_system=True)
+
+        self.assertEqual(len(files), 1)
+
+    def test_normalize_name_preserves_hangul_hiragana_and_katakana(self) -> None:
+        self.assertEqual(AUDIT_MODULE.normalize_name("한국어 도우미"), "한국어-도우미")
+        self.assertEqual(AUDIT_MODULE.normalize_name("かな ヘルパー"), "かな-ヘルパー")
+        self.assertEqual(AUDIT_MODULE.normalize_name("カタカナ helper"), "カタカナ-helper")
+
+    def test_empty_or_meaningless_skill_contract_is_quality_burden_even_with_usage(self) -> None:
+        skills_root = self.tempdir / "skills"
+        meaningless = skills_root / "meaningless-md"
+        meaningless.mkdir(parents=True)
+        (meaningless / "SKILL.md").write_text("asdf\n", encoding="utf-8")
+        empty = write_skill(skills_root, "empty-contract", "Use for focused checks.")
+        (empty / "SKILL.md").write_text(
+            "---\nname: empty-contract\ndescription: Use for focused checks.\n---\n\n# Empty Contract\n",
+            encoding="utf-8",
+        )
+        usage_path = self.tempdir / "usage.json"
+        usage_path.write_text(
+            json.dumps(
+                [
+                    {"name": "meaningless-md", "calls": 12, "recent_30d_calls": 6},
+                    {"name": "empty-contract", "calls": 12, "recent_30d_calls": 6},
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        payload = self.run_audit_json("--skills-root", str(skills_root), "--usage-file", str(usage_path))
+
+        for name in ("meaningless-md", "empty-contract"):
+            item = self.first_result(payload, name)
+            self.assertIn("empty-skill-contract", item["quality_flags"], msg=name)
+            self.assertNotIn(item["action"], {"keep", "keep-narrow"}, msg=name)
+
+    def test_missing_local_python_import_is_quality_burden(self) -> None:
+        skills_root = self.tempdir / "skills"
+        skill_dir = write_skill(
+            skills_root,
+            "missing-local-import",
+            "Run a focused local helper script.",
+            extra_body="Use scripts/run.py for local checks.",
+        )
+        (skill_dir / "scripts" / "run.py").write_text(
+            "from missing_helper_module import run\n\nrun()\n",
+            encoding="utf-8",
+        )
+        usage_path = self.tempdir / "usage.json"
+        usage_path.write_text(json.dumps({"missing-local-import": 12}), encoding="utf-8")
+
+        payload = self.run_audit_json("--skills-root", str(skills_root), "--usage-file", str(usage_path))
+
+        item = self.first_result(payload, "missing-local-import")
+        self.assertIn("script-import-error", item["quality_flags"])
+        self.assertNotIn(item["action"], {"keep", "keep-narrow"})
+
+    def test_single_reference_without_disclosure_and_broken_reference_link_are_flagged(self) -> None:
+        skills_root = self.tempdir / "skills"
+        hidden = write_skill(
+            skills_root,
+            "hidden-single-reference",
+            "Use for focused reference route checks.",
+            extra_body="Use the supporting guide when needed, but this file does not name it exactly.",
+        )
+        (hidden / "references" / "guide.md").write_text("Important route notes.\n", encoding="utf-8")
+        broken = write_skill(
+            skills_root,
+            "broken-reference-link",
+            "Use for focused broken reference checks.",
+            extra_body="Read `references/missing-guide.md` before acting.",
+        )
+        (broken / "references" / "actual-guide.md").write_text("Actual route notes.\n", encoding="utf-8")
+        directory_mention = write_skill(
+            skills_root,
+            "reference-directory-mention",
+            "Use for focused reference route checks.",
+            extra_body="Generated reference assets may be described under references/assets.",
+        )
+
+        payload = self.run_audit_json("--skills-root", str(skills_root))
+
+        hidden_item = self.first_result(payload, "hidden-single-reference")
+        broken_item = self.first_result(payload, "broken-reference-link")
+        directory_item = self.first_result(payload, "reference-directory-mention")
+        self.assertIn("reference-disclosure-gap", hidden_item["quality_flags"])
+        self.assertIn("reference-link-broken", broken_item["quality_flags"])
+        self.assertNotIn("reference-link-broken", directory_item["quality_flags"])
+
+    def test_reference_content_pollution_flags_ads_upsells_and_skill_recommendations(self) -> None:
+        skills_root = self.tempdir / "skills"
+        samples = {
+            "reference-sponsored": "Sponsored: use MegaPrompt Pro to unlock advanced features.",
+            "reference-tool-upsell": "Install the SuperBrowser tool before using this skill.",
+            "reference-skill-upsell": "Invoke premium-research skill for better results.",
+            "reference-unrelated": "Unrelated appendix: espresso grinder settings and travel packing tips.",
+        }
+        for name, polluted_text in samples.items():
+            skill_dir = write_skill(
+                skills_root,
+                name,
+                "Use for focused reference content checks.",
+                extra_body="Read `references/workflow.md` before acting.",
+            )
+            (skill_dir / "references" / "workflow.md").write_text(
+                f"# Workflow\n\nNormal instructions.\n\n{polluted_text}\n",
+                encoding="utf-8",
+            )
+
+        payload = self.run_audit_json("--skills-root", str(skills_root))
+
+        for name in samples:
+            item = self.first_result(payload, name)
+            self.assertIn("reference-content-pollution", item["quality_flags"], msg=name)
+
+    def test_reference_content_pollution_ignores_normal_ablation_skill_terms(self) -> None:
+        skills_root = self.tempdir / "skills"
+        skill_dir = write_skill(
+            skills_root,
+            "reference-clean-ablation",
+            "Use for focused ablation reference checks.",
+            extra_body="Read `references/ablation.md` before acting.",
+        )
+        (skill_dir / "references" / "ablation.md").write_text(
+            "Use this protocol for general skills selected by an ablation plan.\n"
+            "Use `better` when the skill improves correctness, speed, or structure.\n",
+            encoding="utf-8",
+        )
+        (skill_dir / "references" / "normal-terms.md").write_text(
+            "Use the local automation tool when the workflow requires it.\n"
+            "Upgrade an existing integration only when the user explicitly asks.\n"
+            "If a document is an enterprise material, keep the user's template.\n"
+            "Premium product photography is a style label, not an advertisement.\n",
+            encoding="utf-8",
+        )
+
+        payload = self.run_audit_json("--skills-root", str(skills_root))
+
+        item = self.first_result(payload, "reference-clean-ablation")
+        self.assertNotIn("reference-content-pollution", item["quality_flags"])
+
+    def test_duplicate_install_identities_can_be_reported_when_requested(self) -> None:
+        skills_root = self.tempdir / "skills"
+        for suffix in ("source", "bundle"):
+            skill_dir = write_skill(skills_root, f"same-skill-{suffix}", "Audit installed skills.")
+            text = (skill_dir / "SKILL.md").read_text(encoding="utf-8")
+            text = text.replace(
+                "---\n\n#",
+                'metadata: {"openclaw":{"skillKey":"same-skill"}}\n---\n\n#',
+                1,
+            )
+            (skill_dir / "SKILL.md").write_text(text, encoding="utf-8")
+
+        default_payload = self.run_audit_json("--skills-root", str(skills_root))
+        expanded_payload = self.run_audit_json(
+            "--skills-root",
+            str(skills_root),
+            "--show-duplicate-installs",
+        )
+
+        self.assertEqual(len(default_payload["results"]), 1)
+        self.assertEqual(len(expanded_payload["results"]), 2)
+
     def test_zh_decision_summary_uses_compact_default_limit_and_cjk_punctuation(self) -> None:
         ranked = [
             {
@@ -1834,6 +2046,12 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
             "  Keep review conservative.\n"
             "tags:\n"
             "  - audit\n"
+            "metadata:\n"
+            "  openclaw:\n"
+            "    skillKey: sync-nested-key\n"
+            "    requires:\n"
+            "      env:\n"
+            "        - SYNC_NESTED_KEY\n"
         )
 
         self.assertEqual(
@@ -1841,6 +2059,8 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
             "Audit installed skills: usage, overlap, and risk. Keep review conservative.",
         )
         self.assertEqual(parsed["tags"], ["audit"])
+        self.assertEqual(parsed["metadata"]["openclaw"]["skillKey"], "sync-nested-key")
+        self.assertEqual(parsed["metadata"]["openclaw"]["requires"]["env"], ["SYNC_NESTED_KEY"])
 
     def test_sync_bundle_dry_run_does_not_write_bundle(self) -> None:
         isolated_repo = self.tempdir / "repo"

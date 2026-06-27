@@ -66,44 +66,94 @@ def strip_yaml_quotes(value: str) -> str:
     return value
 
 
+def fallback_scalar(value: str) -> object:
+    value = strip_yaml_quotes(value)
+    stripped = value.strip()
+    if stripped[:1] in {"{", "["} and stripped[-1:] in {"}", "]"}:
+        try:
+            return json.loads(stripped)
+        except json.JSONDecodeError:
+            return value
+    return value
+
+
 def fallback_safe_load(raw_yaml: str) -> dict[str, object]:
-    data: dict[str, object] = {}
     lines = raw_yaml.splitlines()
-    index = 0
-    while index < len(lines):
-        line = lines[index]
-        stripped = line.strip()
-        index += 1
-        if not stripped or stripped.startswith("#"):
-            continue
-        if ":" not in stripped:
-            continue
-        key, raw_value = stripped.split(":", 1)
-        key = key.strip()
-        raw_value = raw_value.strip()
-        if raw_value in {">", "|"}:
-            parts: list[str] = []
-            while index < len(lines) and (lines[index].startswith(" ") or not lines[index].strip()):
-                parts.append(lines[index].strip())
+
+    def line_indent(value: str) -> int:
+        return len(value) - len(value.lstrip(" "))
+
+    def next_content_index(index: int) -> int | None:
+        while index < len(lines):
+            stripped = lines[index].strip()
+            if stripped and not stripped.startswith("#"):
+                return index
+            index += 1
+        return None
+
+    def parse_block(index: int, indent: int) -> tuple[object, int]:
+        mapping: dict[str, object] = {}
+        sequence: list[object] = []
+        mode: str | None = None
+        while index < len(lines):
+            line = lines[index]
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
                 index += 1
-            data[key] = "\n".join(part for part in parts if part).replace("\n", " ")
-            continue
-        if raw_value == "":
-            items: list[str] = []
-            while index < len(lines):
-                item_line = lines[index]
-                item_stripped = item_line.strip()
-                if not item_stripped:
-                    index += 1
-                    continue
-                if not item_line.startswith(" ") or not item_stripped.startswith("- "):
+                continue
+            current_indent = line_indent(line)
+            if current_indent < indent:
+                break
+            if current_indent > indent:
+                break
+            if stripped.startswith("- "):
+                mode = mode or "sequence"
+                if mode != "sequence":
                     break
-                items.append(strip_yaml_quotes(item_stripped[2:]))
+                raw_item = stripped[2:].strip()
                 index += 1
-            data[key] = items
-            continue
-        data[key] = strip_yaml_quotes(raw_value)
-    return data
+                if raw_item:
+                    sequence.append(fallback_scalar(raw_item))
+                else:
+                    nested, index = parse_block(index, indent + 2)
+                    sequence.append(nested)
+                continue
+            if ":" not in stripped:
+                break
+            mode = mode or "mapping"
+            if mode != "mapping":
+                break
+            key, raw_value = stripped.split(":", 1)
+            key = key.strip()
+            raw_value = raw_value.strip()
+            index += 1
+            if raw_value in {">", "|"}:
+                parts: list[str] = []
+                while index < len(lines):
+                    part_line = lines[index]
+                    part_stripped = part_line.strip()
+                    if part_stripped and line_indent(part_line) <= current_indent:
+                        break
+                    if part_stripped:
+                        parts.append(part_stripped)
+                    index += 1
+                mapping[key] = (" " if raw_value == ">" else "\n").join(parts)
+                continue
+            if raw_value:
+                mapping[key] = fallback_scalar(raw_value)
+                continue
+            content_index = next_content_index(index)
+            if content_index is None or line_indent(lines[content_index]) <= current_indent:
+                mapping[key] = {}
+                continue
+            nested, index = parse_block(index, line_indent(lines[content_index]))
+            mapping[key] = nested
+        if mode == "sequence":
+            return sequence, index
+        return mapping, index
+
+    parsed, _index = parse_block(0, 0)
+    return parsed if isinstance(parsed, dict) else {}
 
 
 def fallback_safe_dump(data: dict[str, object]) -> str:
