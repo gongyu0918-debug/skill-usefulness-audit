@@ -116,6 +116,77 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
         self.assertEqual(metadata["tags"], ["audit", "skills"])
         self.assertEqual(body, "# Body\n")
 
+    def test_fallback_frontmatter_parses_yaml_inline_lists_without_pyyaml(self) -> None:
+        import skill_usefulness_audit_lib.common as common
+
+        skill_dir = self.tempdir / "inline-list-frontmatter"
+        skill_dir.mkdir()
+        (skill_dir / "SKILL.md").write_text(
+            "---\n"
+            "name: inline-list-frontmatter\n"
+            "description: Call configured external API providers.\n"
+            "tags: [audit, skills]\n"
+            "metadata:\n"
+            "  requires:\n"
+            "    env: [INLINE_API_KEY, SECOND_TOKEN]\n"
+            "---\n\n"
+            "# Inline List Frontmatter\n",
+            encoding="utf-8",
+        )
+
+        with mock.patch.object(common, "yaml", None):
+            skill = AUDIT_MODULE.scan_skill(skill_dir / "SKILL.md")
+
+        self.assertEqual(skill["metadata"]["requires"]["env"], ["INLINE_API_KEY", "SECOND_TOKEN"])
+        self.assertEqual(skill["required_env"], ["INLINE_API_KEY", "SECOND_TOKEN"])
+        self.assertEqual(skill["missing_required_env"], ["INLINE_API_KEY", "SECOND_TOKEN"])
+
+    def test_cli_fallback_frontmatter_yaml_inline_lists_without_pyyaml(self) -> None:
+        skills_root = self.tempdir / "skills"
+        skill_dir = skills_root / "cli-inline-list-frontmatter"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            "---\n"
+            "name: cli-inline-list-frontmatter\n"
+            "description: Call configured external API providers.\n"
+            "metadata:\n"
+            "  requires:\n"
+            "    env: [INLINE_API_KEY, SECOND_TOKEN]\n"
+            "---\n\n"
+            "# CLI Inline List Frontmatter\n",
+            encoding="utf-8",
+        )
+        no_yaml_dir = self.tempdir / "no-yaml"
+        no_yaml_dir.mkdir()
+        (no_yaml_dir / "yaml.py").write_text(
+            'raise ImportError("test disables PyYAML")\n',
+            encoding="utf-8",
+        )
+        json_out = self.tempdir / "cli-inline-list-report.json"
+        env = os.environ.copy()
+        env["PYTHONPATH"] = str(no_yaml_dir) + os.pathsep + env.get("PYTHONPATH", "")
+
+        subprocess.run(
+            [
+                sys.executable,
+                str(AUDIT_SCRIPT),
+                "audit",
+                "--skills-root",
+                str(skills_root),
+                "--json-out",
+                str(json_out),
+            ],
+            cwd=REPO_ROOT,
+            env=env,
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+
+        item = self.first_result(json.loads(json_out.read_text(encoding="utf-8")), "cli-inline-list-frontmatter")
+        self.assertEqual(item["required_env"], ["INLINE_API_KEY", "SECOND_TOKEN"])
+        self.assertEqual(item["missing_required_env"], ["INLINE_API_KEY", "SECOND_TOKEN"])
+
     def test_fallback_frontmatter_preserves_nested_openclaw_metadata_without_pyyaml(self) -> None:
         import skill_usefulness_audit_lib.common as common
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.7
+
+- Parse YAML-style inline lists in no-PyYAML fallback frontmatter, including required env metadata such as `env: [API_KEY, SECOND_TOKEN]`
+- Keep fallback parsing behavior aligned between the runtime source and ClawHub bundle sync script
+- Add a real CLI subprocess regression that disables PyYAML through an isolated import path and verifies required env evidence is preserved
+- Record the Hermes/GLM report cross-validation and accepted/rejected findings for the 0.3.6 baseline
+
 ## 0.3.6
 
 - Preserve nested OpenClaw metadata and required env fields in no-PyYAML fallback parsing and bundle sync

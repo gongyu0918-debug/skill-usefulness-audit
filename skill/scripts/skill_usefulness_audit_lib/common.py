@@ -101,6 +101,34 @@ def strip_yaml_quotes(value: str) -> str:
     return value
 
 
+def parse_inline_sequence(value: str) -> list[object] | None:
+    inner = value[1:-1].strip()
+    if not inner:
+        return []
+    items: list[str] = []
+    current: list[str] = []
+    quote: str | None = None
+    for char in inner:
+        if quote:
+            current.append(char)
+            if char == quote:
+                quote = None
+            continue
+        if char in {"'", '"'}:
+            quote = char
+            current.append(char)
+            continue
+        if char == ",":
+            items.append("".join(current).strip())
+            current = []
+            continue
+        current.append(char)
+    if quote:
+        return None
+    items.append("".join(current).strip())
+    return [strip_yaml_quotes(item) for item in items]
+
+
 def parse_frontmatter_scalar(value: str) -> object:
     value = strip_yaml_quotes(value)
     stripped = value.strip()
@@ -108,6 +136,10 @@ def parse_frontmatter_scalar(value: str) -> object:
         try:
             return json.loads(stripped)
         except json.JSONDecodeError:
+            if stripped.startswith("["):
+                parsed_sequence = parse_inline_sequence(stripped)
+                if parsed_sequence is not None:
+                    return parsed_sequence
             return value
     return value
 
