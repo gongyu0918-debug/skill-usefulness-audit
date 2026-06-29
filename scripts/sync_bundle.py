@@ -73,6 +73,7 @@ def fallback_inline_sequence(value: str) -> list[object] | None:
     items: list[str] = []
     current: list[str] = []
     quote: str | None = None
+    bracket_depth = 0
     for char in inner:
         if quote:
             current.append(char)
@@ -83,15 +84,32 @@ def fallback_inline_sequence(value: str) -> list[object] | None:
             quote = char
             current.append(char)
             continue
-        if char == ",":
-            items.append("".join(current).strip())
+        if char == "[":
+            bracket_depth += 1
+            current.append(char)
+            continue
+        if char == "]":
+            if bracket_depth == 0:
+                return None
+            bracket_depth -= 1
+            current.append(char)
+            continue
+        if char == "," and bracket_depth == 0:
+            item = "".join(current).strip()
+            if item:
+                items.append(item)
             current = []
             continue
         current.append(char)
-    if quote:
+    if quote or bracket_depth:
         return None
-    items.append("".join(current).strip())
-    return [strip_yaml_quotes(item) for item in items]
+    item = "".join(current).strip()
+    if item:
+        items.append(item)
+    return [
+        fallback_scalar(item) if item.startswith("[") and item.endswith("]") else strip_yaml_quotes(item)
+        for item in items
+    ]
 
 
 def fallback_scalar(value: str) -> object:

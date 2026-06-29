@@ -141,6 +141,54 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
         self.assertEqual(skill["required_env"], ["INLINE_API_KEY", "SECOND_TOKEN"])
         self.assertEqual(skill["missing_required_env"], ["INLINE_API_KEY", "SECOND_TOKEN"])
 
+    def test_fallback_frontmatter_matches_pyyaml_nested_inline_lists_without_pyyaml(self) -> None:
+        import skill_usefulness_audit_lib.common as common
+
+        skill_dir = self.tempdir / "nested-inline-list-frontmatter"
+        skill_dir.mkdir()
+        (skill_dir / "SKILL.md").write_text(
+            "---\n"
+            "name: nested-inline-list-frontmatter\n"
+            "description: Call configured external API providers.\n"
+            "metadata:\n"
+            "  requires:\n"
+            "    env: [[NESTED_API_KEY, SECOND_TOKEN]]\n"
+            "---\n\n"
+            "# Nested Inline List Frontmatter\n",
+            encoding="utf-8",
+        )
+
+        expected = AUDIT_MODULE.scan_skill(skill_dir / "SKILL.md")
+        with mock.patch.object(common, "yaml", None):
+            fallback = AUDIT_MODULE.scan_skill(skill_dir / "SKILL.md")
+
+        self.assertEqual(fallback["metadata"], expected["metadata"])
+        self.assertEqual(fallback["required_env"], ["NESTED_API_KEY", "SECOND_TOKEN"])
+        self.assertEqual(fallback["missing_required_env"], ["NESTED_API_KEY", "SECOND_TOKEN"])
+
+    def test_fallback_frontmatter_ignores_trailing_inline_list_comma_without_pyyaml(self) -> None:
+        import skill_usefulness_audit_lib.common as common
+
+        text = (
+            "---\n"
+            "name: trailing-inline-list-frontmatter\n"
+            "tags: [audit, skills,]\n"
+            "metadata:\n"
+            "  requires:\n"
+            "    env: [TRAILING_API_KEY, SECOND_TOKEN,]\n"
+            "---\n\n"
+            "# Trailing Inline List Frontmatter\n"
+        )
+
+        expected, _body = common.parse_frontmatter(text)
+        with mock.patch.object(common, "yaml", None):
+            fallback, body = common.parse_frontmatter(text)
+
+        self.assertEqual(fallback, expected)
+        self.assertEqual(fallback["tags"], ["audit", "skills"])
+        self.assertEqual(fallback["metadata"]["requires"]["env"], ["TRAILING_API_KEY", "SECOND_TOKEN"])
+        self.assertEqual(body, "# Trailing Inline List Frontmatter\n")
+
     def test_cli_fallback_frontmatter_yaml_inline_lists_without_pyyaml(self) -> None:
         skills_root = self.tempdir / "skills"
         skill_dir = skills_root / "cli-inline-list-frontmatter"
@@ -154,6 +202,19 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
             "    env: [INLINE_API_KEY, SECOND_TOKEN]\n"
             "---\n\n"
             "# CLI Inline List Frontmatter\n",
+            encoding="utf-8",
+        )
+        nested_skill_dir = skills_root / "cli-nested-inline-list-frontmatter"
+        nested_skill_dir.mkdir()
+        (nested_skill_dir / "SKILL.md").write_text(
+            "---\n"
+            "name: cli-nested-inline-list-frontmatter\n"
+            "description: Call configured external API providers.\n"
+            "metadata:\n"
+            "  requires:\n"
+            "    env: [[NESTED_API_KEY, SECOND_TOKEN]]\n"
+            "---\n\n"
+            "# CLI Nested Inline List Frontmatter\n",
             encoding="utf-8",
         )
         no_yaml_dir = self.tempdir / "no-yaml"
@@ -183,9 +244,13 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
             check=True,
         )
 
-        item = self.first_result(json.loads(json_out.read_text(encoding="utf-8")), "cli-inline-list-frontmatter")
+        payload = json.loads(json_out.read_text(encoding="utf-8"))
+        item = self.first_result(payload, "cli-inline-list-frontmatter")
         self.assertEqual(item["required_env"], ["INLINE_API_KEY", "SECOND_TOKEN"])
         self.assertEqual(item["missing_required_env"], ["INLINE_API_KEY", "SECOND_TOKEN"])
+        nested_item = self.first_result(payload, "cli-nested-inline-list-frontmatter")
+        self.assertEqual(nested_item["required_env"], ["NESTED_API_KEY", "SECOND_TOKEN"])
+        self.assertEqual(nested_item["missing_required_env"], ["NESTED_API_KEY", "SECOND_TOKEN"])
 
     def test_fallback_frontmatter_preserves_nested_openclaw_metadata_without_pyyaml(self) -> None:
         import skill_usefulness_audit_lib.common as common
@@ -214,6 +279,18 @@ class SkillUsefulnessAuditTests(unittest.TestCase):
         self.assertIn("skill:nested-frontmatter-key", skill["install_identities"])
         self.assertEqual(skill["required_env"], ["SKILL_AUDIT_NESTED_KEY"])
         self.assertEqual(skill["missing_required_env"], ["SKILL_AUDIT_NESTED_KEY"])
+
+    def test_missing_required_env_treats_empty_values_as_missing(self) -> None:
+        with mock.patch.dict(os.environ, {"SKILL_AUDIT_EMPTY_KEY": "", "SKILL_AUDIT_SET_KEY": "configured"}, clear=False):
+            self.assertEqual(
+                AUDIT_MODULE.missing_required_env(
+                    ["SKILL_AUDIT_EMPTY_KEY", "SKILL_AUDIT_SET_KEY", "SKILL_AUDIT_UNSET_KEY"]
+                ),
+                ["SKILL_AUDIT_EMPTY_KEY", "SKILL_AUDIT_UNSET_KEY"],
+            )
+
+    def test_host_prompt_marker_still_matches_agents_md_instruction_header(self) -> None:
+        self.assertTrue(AUDIT_MODULE.looks_like_host_prompt("# AGENTS.md instructions"))
 
     def test_fallback_frontmatter_nested_skill_key_dedupes_without_pyyaml(self) -> None:
         import skill_usefulness_audit_lib.common as common
