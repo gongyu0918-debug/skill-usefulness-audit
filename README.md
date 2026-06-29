@@ -180,5 +180,5 @@ python codex-skill/scripts/skill_usefulness_audit.py audit \
 
 ```bash
 python scripts/sync_bundle.py
-clawhub publish ./skill --slug skill-usefulness-audit --name "skill-usefulness-audit" --version 0.3.7 --tags latest,audit,skills,openclaw --changelog "Parse YAML inline lists in no-PyYAML fallback frontmatter and preserve required env evidence"
+clawhub publish ./skill --slug skill-usefulness-audit --name "skill-usefulness-audit" --version 0.3.8 --tags latest,audit,skills,openclaw --changelog "Mitigate Hermes install-scan false positives and preserve fallback frontmatter parity"
 ```

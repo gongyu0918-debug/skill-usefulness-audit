@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.8
+
+- Mitigate Hermes v0.17.0 install-scan false positives while preserving host prompt filtering and required-env readiness behavior
+- Match PyYAML behavior for nested YAML inline lists and trailing commas in no-PyYAML fallback frontmatter parsing
+- Add regression coverage for Hermes-safe env checks, host prompt marker matching, and fallback parser parity
+- Record cross-validation evidence for the v0.3.7 review findings, including isolated Hermes install reproduction and scanner verification
+
 ## 0.3.7
 
 - Parse YAML-style inline lists in no-PyYAML fallback frontmatter, including required env metadata such as `env: [API_KEY, SECOND_TOKEN]`
